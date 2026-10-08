@@ -20,9 +20,11 @@ if (modo === 'todo') {
 }
 urls = urls.slice(0, 10000);
 
-const res = await fetch('https://api.indexnow.org/indexnow', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  body: JSON.stringify({ host: new URL(SITE).host, key: CFG.indexNowKey, keyLocation: `${SITE}/${CFG.indexNowKey}.txt`, urlList: urls }),
-});
-console.log(`IndexNow: ${urls.length} URLs enviadas → HTTP ${res.status}`);
+const body = JSON.stringify({ host: new URL(SITE).host, key: CFG.indexNowKey, keyLocation: `${SITE}/${CFG.indexNowKey}.txt`, urlList: urls });
+// Un 403 justo tras publicar suele ser porque el fichero de clave aún no se ha propagado: reintentamos.
+for (let intento = 1; intento <= 3; intento++) {
+  const res = await fetch('https://api.indexnow.org/indexnow', { method: 'POST', headers: { 'Content-Type': 'application/json; charset=utf-8' }, body });
+  console.log(`IndexNow: ${urls.length} URLs enviadas → HTTP ${res.status} (intento ${intento})`);
+  if (res.status < 300) break;
+  await new Promise((r) => setTimeout(r, 90000));
+}
