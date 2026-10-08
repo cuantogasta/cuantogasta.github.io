@@ -44,9 +44,9 @@ async function pricesFor(date) {
 
 // ---------------------------------------------------------------- bloque de precios
 function skeleton() {
-  return `<div class="price-block"><div id="pb-stats"></div>
+  return `<div class="card strip-card"><div id="pb-strip"></div></div><div class="price-block"><div id="pb-stats"></div>
 <div class="card chart-card"><div class="chart-head"><h2 class="h3">Precio por horas (€/kWh)</h2><span class="legend"><i class="lg-b"></i>barata <i class="lg-m"></i>media <i class="lg-c"></i>cara</span></div><div id="pb-chart"></div></div>
-<div class="card"><h2 class="h3">Mejores franjas para usar electrodomésticos</h2><div id="pb-windows"></div></div></div>
+<div class="card"><h2 class="h3">Las mejores franjas del día</h2><div id="pb-windows"></div></div></div>
 <div class="card"><h2 class="h3">Precio de la luz hora a hora</h2><div class="table-wrap" id="pb-table"></div></div>`;
 }
 
@@ -58,28 +58,51 @@ function renderDay(date, values, tomorrow) {
   set('pb-chart', C.hourlyChart(date, values));
   set('pb-windows', C.windowsBlock(date, values));
   set('pb-table', C.hourlyTable(date, values));
+  set('pb-strip', C.hourStrip(date, values));
   const st = C.dayStats(values);
   const lead = $('#pb-date');
   if (lead) lead.innerHTML = `${cap(C.fechaLarga(date, true))}. El precio medio ${tomorrow ? 'será' : 'es'} de <strong>${C.fmt(st.avg, 3)} €/kWh</strong>; la hora más barata, ${C.rangoHora(st.minH)} (${C.fmt(st.min, 3)} €/kWh).`;
 }
 
-function highlightNow(date, values) {
-  if (date !== NOW.date) return;
-  const st = C.dayStats(values);
+// Marca la hora actual en cualquier tira, gráfico o tabla del día de hoy.
+function markNow(values) {
   const i = C.hourIndex(values.length, NOW.hour);
+  $$(`.strip[data-date="${NOW.date}"] .strip-bar span[data-i="${i}"]`).forEach((el) => el.classList.add('now'));
   $(`#pb-chart rect[data-i="${i}"]`)?.classList.add('now');
   $(`#pb-table tr[data-i="${i}"]`)?.classList.add('now');
-  const box = $('#ahora');
-  if (!box) return;
+  return i;
+}
+
+function fillNowCard(values) {
+  const card = $('#now-card');
+  if (!card) return;
+  const st = C.dayStats(values);
+  const i = C.hourIndex(values.length, NOW.hour);
   const v = st.p[i];
-  const per = C.periodo(date, NOW.hour);
-  const rel = v < st.t1 ? 'de las horas más baratas del día' : v < st.t2 ? 'un precio intermedio' : 'de las horas más caras del día';
+  const lvl = st.level(v);
+  card.classList.remove('st-b', 'st-m', 'st-c');
+  card.classList.add(`st-${lvl}`);
+  $('#now-label').textContent = `Ahora · ${C.rangoHora(NOW.hour)} · ${C.periodo(NOW.date, NOW.hour)}`;
+  $('#now-price').textContent = C.fmt(v, 3);
+  $('#now-state').textContent = C.ESTADO[lvl].label;
   const next = C.bestWindow(st.p, 1, i);
-  const nextTxt = next && next.start !== i
-    ? `La hora más barata de lo que queda de hoy: <strong>${C.rangoHora(st.labels[next.start])}</strong> (${C.fmt(next.avg, 3)} €/kWh).`
-    : 'Es la hora más barata de lo que queda de día: buen momento para poner electrodomésticos.';
-  box.innerHTML = `<div>Ahora (${C.rangoHora(NOW.hour)}): <strong>${C.fmt(v, 3)} €/kWh</strong> <span class="per">${per}</span> · ${rel}.</div><div>${nextTxt}</div>`;
-  box.hidden = false;
+  $('#now-next').innerHTML = next && next.start !== i
+    ? `Próxima hora más barata: <strong>${C.rangoHora(st.labels[next.start])}</strong> (${C.fmt(next.avg, 3)} €/kWh)`
+    : '<strong>Es la hora más barata</strong> de lo que queda de día: buen momento para poner electrodomésticos.';
+}
+
+async function initHeaderNow() {
+  const el = $('#hdr-now');
+  if (!el) return;
+  const values = pd?.type === 'day' && !pd.tomorrow && pd.date === NOW.date ? pd.values : (await recent())[NOW.date];
+  if (!values) return;
+  const st = C.dayStats(values);
+  const i = C.hourIndex(values.length, NOW.hour);
+  const lvl = st.level(st.p[i]);
+  el.innerHTML = `<span class="dot st-${lvl}"></span><span>Ahora <b>${C.fmt(st.p[i], 3)} €</b>/kWh</span>`;
+  el.title = `${C.rangoHora(NOW.hour)}: ${C.ESTADO[lvl].label.toLowerCase()}`;
+  el.hidden = false;
+  markNow(values);
 }
 
 async function initDay() {
@@ -92,10 +115,58 @@ async function initDay() {
     } else if (pd.tomorrow && pd.date < target) {
       const lead = $('#pb-date');
       if (lead) lead.innerHTML = `El precio de la luz para ${C.fechaLarga(target, true)} todavía no se ha publicado. Red Eléctrica lo publica hacia las 20:15-20:30.`;
-      $$('.price-block, #pb-table').forEach((el) => el.closest('.card, .price-block')?.remove());
+      $$('.price-block, #pb-table, #pb-strip').forEach((el) => el.closest('.card, .price-block')?.remove());
     }
   }
-  if (!pd.tomorrow && pd.values) highlightNow(pd.date, pd.values);
+  if (!pd.tomorrow && pd.values && pd.date === NOW.date) {
+    markNow(pd.values);
+    fillNowCard(pd.values);
+  }
+}
+
+// ---------------------------------------------------------------- tarjetas "¿a qué hora pongo…?" según la hora actual
+async function initBestCards() {
+  const grid = $('.best-grid');
+  if (!grid) return;
+  const r = await recent();
+  const hoy = r[NOW.date];
+  const man = r[C.addDays(NOW.date, 1)];
+  const imp = JSON.parse(grid.dataset.imp || 'null');
+  if (!hoy || !imp) return;
+  const from = C.hourIndex(hoy.length, NOW.hour) + (NOW.minute > 15 ? 1 : 0);
+  for (const card of $$('.best', grid)) {
+    const horas = Number(card.dataset.horas), kwh = Number(card.dataset.kwh);
+    let values = hoy, w = C.bestWindow(C.dayStats(hoy).p, horas, from), cuando = 'hoy';
+    if (!w && man) { values = man; w = C.bestWindow(C.dayStats(man).p, horas); cuando = 'mañana'; }
+    if (!w) {
+      $('.best-win', card).textContent = 'Hoy ya no quedan';
+      $('.best-when', card).textContent = 'mañana';
+      $('.best-cost', card).textContent = 'El precio de mañana sale hacia las 20:30';
+      continue;
+    }
+    const st = C.dayStats(values);
+    const bad = C.worstWindow(st.p, horas);
+    $('.best-win', card).textContent = `${C.pad(st.labels[w.start])}:00 – ${C.pad((st.labels[w.end - 1] + 1) % 24)}:00`;
+    $('.best-when', card).textContent = cuando;
+    $('.best-cost', card).innerHTML = `<b>${C.eurAuto(kwh * C.conImpuestos(w.avg, imp))}</b> en vez de <s>${C.eurAuto(kwh * C.conImpuestos(bad.avg, imp))}</s>`;
+  }
+}
+
+// ---------------------------------------------------------------- compartir
+function initShare() {
+  for (const box of $$('.share')) {
+    const url = box.dataset.shareUrl, text = box.dataset.shareText;
+    const copy = $('.sh-copy', box);
+    copy?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url); copy.querySelector('span').textContent = '¡Copiado!'; } catch { copy.querySelector('span').textContent = url; }
+    });
+    if (navigator.share) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'sh sh-native'; b.textContent = 'Compartir…';
+      b.addEventListener('click', () => navigator.share({ title: document.title, text, url }).catch(() => {}));
+      $('.share-btns', box).prepend(b);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- mejor hora (desde ahora)
@@ -235,5 +306,10 @@ initCalcs();
 initSimple();
 initCasa();
 initTramo();
-if (pd?.type === 'day') initDay();
-if (pd?.type === 'mejorhora') initMejorHora();
+initShare();
+(async () => {
+  if (pd?.type === 'day') await initDay();
+  if (pd?.type === 'mejorhora') await initMejorHora();
+  await initHeaderNow();
+  await initBestCards();
+})();

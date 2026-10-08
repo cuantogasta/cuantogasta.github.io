@@ -234,3 +234,15 @@ export function calcCoste(p, precio) {
     unidad: kwhUnidad * precio, dia: kwhDia * precio, mes: kwhMes * precio, anio: kwhAnio * precio,
   };
 }
+
+// ---------- Tira de 24 horas y estado actual ----------
+export const ESTADO = {
+  b: { cls: 'b', label: 'Luz barata', corto: 'barata' },
+  m: { cls: 'm', label: 'Precio normal', corto: 'normal' },
+  c: { cls: 'c', label: 'Luz cara', corto: 'cara' },
+};
+export function hourStrip(dateStr, values) {
+  const st = dayStats(values);
+  const cells = st.p.map((v, i) => `<span class="s-${st.level(v)}" data-i="${i}" title="${rangoHora(st.labels[i])}: ${fmt(v, 3)} €/kWh"></span>`).join('');
+  return `<div class="strip" data-date="${dateStr}" role="img" aria-label="Horas baratas y caras del ${fechaLarga(dateStr)}"><div class="strip-bar">${cells}</div><div class="strip-axis"><i>0h</i><i>6h</i><i>12h</i><i>18h</i><i>24h</i></div></div>`;
+}

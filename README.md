@@ -37,4 +37,4 @@ npm run dev      # descarga precios, genera dist/ y lo sirve en http://localhost
 
 Requiere Node 20 o superior. No hay dependencias que instalar.
 
-Datos: [Red Eléctrica de España – REData](https://www.ree.es/es/apidatos).
+Datos: [Red Eléctrica de España – REData](https://www.ree.es/es/apidatos). Tipografía: [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) (SIL Open Font License 1.1), alojada en la propia web. Iconos propios.
