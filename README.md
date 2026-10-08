@@ -1,6 +1,6 @@
 # CuántoGasta ⚡
 
-**https://shikimokami.github.io** · Precio de la luz hoy por horas (PVPC) y cuánto gasta cada aparato en euros.
+**https://cuantogasta.github.io** · Precio de la luz hoy por horas (PVPC) y cuánto gasta cada aparato en euros.
 
 Web estática que **se actualiza sola** cada día con los precios oficiales de Red Eléctrica y genera páginas nuevas automáticamente. No necesita servidor, base de datos ni mantenimiento.
 
