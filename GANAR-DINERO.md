@@ -13,17 +13,13 @@ La web está verificada en Search Console, el sitemap (456 páginas) está envia
 
 Puedes ver cuántas personas llegan desde Google en <https://search.google.com/search-console> → **Rendimiento**. Los primeros datos aparecen al cabo de unos días.
 
-## 2. Amazon Afiliados (gratis, 10 min) — ingresos por compras
+## 2. Amazon Afiliados — ✅ HECHO (8/10/2026)
 
-Cada página de aparato y cada guía enlaza a Amazon: radiadores, enchufes medidores, splits… Si alguien compra, Amazon te paga una comisión, normalmente entre el 3 % y el 7 %.
+ID de seguimiento `cuantogasta03-21` activo en todos los enlaces a Amazon de la web. El aviso legal obligatorio se muestra automáticamente.
 
-1. Regístrate en <https://afiliados.amazon.es> con tu cuenta de Amazon.
-2. En "Sitios web", añade `https://cuantogasta.github.io`.
-3. Elige un ID de seguimiento, por ejemplo `cuantogasta-21`.
-4. Pégalo en `site.config.json` → `"monetizacion"` → `"amazonTag"` y guarda.
-5. Completa la información fiscal y de pago dentro de Afiliados.
-
-La web añade sola el aviso legal obligatorio ("En calidad de Afiliado de Amazon…"). Amazon revisa la cuenta cuando llegan las **3 primeras ventas en 180 días**. Si no se alcanzan, puedes volver a solicitarlo más adelante.
+- Comisiones y clics: <https://afiliados.amazon.es> → **Informes**.
+- Amazon revisa la cuenta cuando llegan las **3 primeras ventas en 180 días**. Si no se llega, se puede volver a solicitar.
+- Recuerda completar en Afiliados la **información fiscal y de pago** para poder cobrar.
 
 ## 3. Google AdSense (gratis) — ingresos por publicidad
 
