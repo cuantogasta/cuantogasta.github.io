@@ -1,0 +1,784 @@
+// Generador estático de CuántoGasta. Sin dependencias: `node src/build.mjs` crea dist/.
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import * as C from './assets/core.js';
+import { APARATOS, CATEGORIAS, PRODUCTOS_AHORRO } from './content/aparatos.mjs';
+import { GUIAS } from './content/guias.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIST = path.join(ROOT, 'dist');
+const CFG = JSON.parse(fs.readFileSync(path.join(ROOT, 'site.config.json'), 'utf8'));
+const SITE = CFG.siteUrl.replace(/\/$/, '');
+const MON = CFG.monetizacion || {};
+const IMP = CFG.impuestos;
+const NOW = C.madridNow();
+const TODAY = NOW.date;
+const TOMORROW = C.addDays(TODAY, 1);
+const YEAR = TODAY.slice(0, 4);
+const BUILD_ISO = new Date().toISOString();
+
+// ---------------------------------------------------------------- datos
+const PRICES = {};
+for (const f of fs.readdirSync(path.join(ROOT, 'data', 'prices')).filter((f) => f.endsWith('.json')).sort()) {
+  Object.assign(PRICES, JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'prices', f), 'utf8')));
+}
+const DATES = Object.keys(PRICES).sort();
+const PAST = DATES.filter((d) => d <= TODAY);
+const LATEST = PAST.at(-1); // normalmente hoy
+const HAS_TOMORROW = Boolean(PRICES[TOMORROW]);
+const HAS_TODAY = LATEST === TODAY;
+const dayAvg = (d) => PRICES[d].reduce((a, b) => a + b, 0) / PRICES[d].length / 1000;
+const last30 = PAST.slice(-30);
+const MEDIA30 = last30.reduce((a, d) => a + dayAvg(d), 0) / last30.length; // €/kWh sin impuestos
+const MEDIA30_CON = C.conImpuestos(MEDIA30, IMP);
+const conImp = (p) => C.conImpuestos(p, IMP);
+const MONTHS = [...new Set(DATES.map((d) => d.slice(0, 7)))].sort();
+
+// ---------------------------------------------------------------- utilidades
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const p3 = (n) => C.fmt(n, 3);
+const hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 8);
+const sitemap = [];
+
+function write(urlPath, content, { sitemapEntry = true, lastmod = TODAY, priority } = {}) {
+  const isFile = /\.[a-z0-9]+$/i.test(urlPath);
+  const file = isFile ? path.join(DIST, urlPath) : path.join(DIST, urlPath, 'index.html');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  if (sitemapEntry && !isFile) sitemap.push({ loc: SITE + urlPath, lastmod, priority });
+}
+
+function amazonUrl(q) {
+  const u = new URL('https://www.amazon.es/s');
+  u.searchParams.set('k', q);
+  if (MON.amazonTag) u.searchParams.set('tag', MON.amazonTag);
+  return u.toString();
+}
+const amazonAttrs = 'rel="sponsored nofollow noopener" target="_blank"';
+
+// ---------------------------------------------------------------- assets
+fs.rmSync(DIST, { recursive: true, force: true });
+fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true });
+const ASSET_V = {};
+for (const f of ['style.css', 'core.js', 'app.js']) {
+  let src = fs.readFileSync(path.join(ROOT, 'src', 'assets', f), 'utf8');
+  // app.js importa core.js: versionamos el import para que nunca se mezclen versiones en caché.
+  if (f === 'app.js') src = src.replace("from './core.js'", `from './core.js?v=${ASSET_V['core.js']}'`);
+  ASSET_V[f] = hash(src);
+  fs.writeFileSync(path.join(DIST, 'assets', f), src);
+}
+for (const f of ['og.png', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon.ico']) {
+  const src = path.join(ROOT, 'src', 'assets', f);
+  if (fs.existsSync(src)) fs.copyFileSync(src, path.join(DIST, f === 'og.png' ? 'assets/og.png' : f));
+}
+const LOGO = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0f766e"/><path d="M18.5 4 8 18h7l-1.5 10L24 14h-7z" fill="#fde047"/></svg>';
+fs.writeFileSync(path.join(DIST, 'favicon.svg'), LOGO.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '));
+
+// ---------------------------------------------------------------- layout
+const NAV = [
+  ['/', 'Precio hoy'],
+  ['/precio-luz-manana/', 'Mañana'],
+  ['/cuanto-gasta/', '¿Cuánto gasta?'],
+  ['/calculadora-consumo-electrico/', 'Calculadora'],
+  ['/guias/', 'Guías'],
+];
+
+function layout({ title, desc, urlPath, body, crumbs = [], jsonld = [], pageData = null, ogType = 'website', noindex = false }) {
+  const url = SITE + urlPath;
+  const fullTitle = title.includes(CFG.siteName) || title.length > 52 ? title : `${title} | ${CFG.siteName}`;
+  const ld = [...jsonld];
+  if (crumbs.length) {
+    ld.push({
+      '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+      itemListElement: [['/', 'Inicio'], ...crumbs].map(([href, name], i) => ({ '@type': 'ListItem', position: i + 1, name, item: SITE + href })),
+    });
+  }
+  const crumbHtml = crumbs.length
+    ? `<nav class="crumbs" aria-label="Migas de pan"><a href="/">Inicio</a>${crumbs.map(([href, name], i) => (i === crumbs.length - 1 ? ` › <span>${esc(name)}</span>` : ` › <a href="${href}">${esc(name)}</a>`)).join('')}</nav>`
+    : '';
+  const nav = NAV.map(([href, label]) => `<a href="${href}"${href === urlPath ? ' aria-current="page"' : ''}>${label}</a>`).join('');
+  const v = CFG.verificacion || {};
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(fullTitle)}</title>
+<meta name="description" content="${esc(desc)}">
+<link rel="canonical" href="${url}">
+${noindex ? '<meta name="robots" content="noindex">\n' : ''}<meta property="og:type" content="${ogType}">
+<meta property="og:site_name" content="${esc(CFG.siteName)}">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:url" content="${url}">
+<meta property="og:image" content="${SITE}/assets/og.png">
+<meta property="og:locale" content="es_ES">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/assets/style.css?v=${ASSET_V['style.css']}">
+${v.googleSiteVerification ? `<meta name="google-site-verification" content="${esc(v.googleSiteVerification)}">\n` : ''}${v.bingSiteVerification ? `<meta name="msvalidate.01" content="${esc(v.bingSiteVerification)}">\n` : ''}${MON.adsenseClient ? `<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${esc(MON.adsenseClient)}" crossorigin="anonymous"></script>\n` : ''}${ld.map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join('\n')}
+</head>
+<body>
+<a class="skip" href="#main">Saltar al contenido</a>
+<header class="site-header"><div class="wrap">
+<a class="brand" href="/">${LOGO}<span>${esc(CFG.siteName)}</span></a>
+<nav class="main-nav" aria-label="Principal">${nav}</nav>
+</div></header>
+<main id="main" class="wrap">
+${crumbHtml}
+${body}
+</main>
+${footer()}
+${pageData ? `<script type="application/json" id="page-data">${JSON.stringify(pageData)}</script>\n` : ''}<script type="module" src="/assets/app.js?v=${ASSET_V['app.js']}"></script>
+${CFG.analitica?.cloudflareToken ? `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"${esc(CFG.analitica.cloudflareToken)}"}'></script>\n` : ''}</body>
+</html>
+`;
+}
+
+function footer() {
+  const top = APARATOS.filter((a) => ['radiador-de-aceite', 'aire-acondicionado', 'freidora-de-aire', 'lavadora', 'termo-electrico', 'coche-electrico', 'horno', 'frigorifico'].includes(a.slug));
+  return `<footer class="site-footer"><div class="wrap">
+<div class="foot-cols">
+<div><strong>${esc(CFG.siteName)}</strong><p>${esc(CFG.lema)}. Datos oficiales de Red Eléctrica actualizados automáticamente cada día.</p>${MON.kofiUrl ? `<p><a class="btn btn-small" href="${esc(MON.kofiUrl)}" rel="noopener" target="_blank">☕ Invítame a un café</a></p>` : ''}</div>
+<div><strong>Precio de la luz</strong><ul><li><a href="/">Hoy por horas</a></li><li><a href="/precio-luz-manana/">Mañana</a></li><li><a href="/precio-luz/">Histórico</a></li><li><a href="/mejor-hora/">Mejor hora para…</a></li></ul></div>
+<div><strong>¿Cuánto gasta?</strong><ul>${top.map((a) => `<li><a href="/cuanto-gasta/${a.slug}/">${esc(cap(a.corto || a.nombre))}</a></li>`).join('')}</ul></div>
+<div><strong>Más</strong><ul><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li><li><a href="/guias/">Guías de ahorro</a></li><li><a href="/sobre/">Sobre la web</a></li><li><a href="/aviso-legal/">Aviso legal</a></li><li><a href="/privacidad/">Privacidad y cookies</a></li></ul></div>
+</div>
+<p class="legal">Precios PVPC de la tarifa 2.0TD para la península, Baleares y Canarias (fuente: <a href="https://www.ree.es/es/apidatos" rel="noopener">Red Eléctrica, REData</a>). Los precios por hora no incluyen impuestos; las estimaciones de coste incluyen impuesto eléctrico (${C.fmt(IMP.impuestoElectrico * 100, 2)} %) e IVA (${C.fmt(IMP.iva * 100, 0)} %). Información orientativa, no constituye asesoramiento.${MON.amazonTag ? ' En calidad de Afiliado de Amazon, obtengo ingresos por las compras adscritas que cumplen los requisitos aplicables.' : ''}</p>
+</div></footer>`;
+}
+
+// ---------------------------------------------------------------- componentes
+function priceBlock(date, values, { idPrefix = 'pb', showWindows = true } = {}) {
+  return `<div class="price-block" data-date="${date}">
+<div id="${idPrefix}-stats">${C.priceSummary(date, values)}</div>
+<div class="card chart-card"><div class="chart-head"><h2 class="h3">Precio por horas (€/kWh)</h2><span class="legend"><i class="lg-b"></i>barata <i class="lg-m"></i>media <i class="lg-c"></i>cara</span></div>
+<div id="${idPrefix}-chart">${C.hourlyChart(date, values)}</div></div>
+${showWindows ? `<div class="card"><h2 class="h3">Mejores franjas para usar electrodomésticos</h2><div id="${idPrefix}-windows">${C.windowsBlock(date, values)}</div></div>` : ''}
+</div>`;
+}
+
+function tableBlock(date, values, idPrefix = 'pb') {
+  return `<div class="card"><h2 class="h3">Precio de la luz hora a hora</h2><div class="table-wrap" id="${idPrefix}-table">${C.hourlyTable(date, values)}</div></div>`;
+}
+
+function faqBlock(items, title = 'Preguntas frecuentes') {
+  return {
+    html: `<section class="faq"><h2>${title}</h2>${items.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${a}</p></details>`).join('')}</section>`,
+    ld: {
+      '@context': 'https://schema.org', '@type': 'FAQPage',
+      mainEntity: items.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a.replace(/<[^>]+>/g, '') } })),
+    },
+  };
+}
+
+// Coste de un consumo (kWh) en la hora más barata y más cara de un día
+function costeHoyLista(date, items) {
+  const st = C.dayStats(PRICES[date]);
+  return `<table class="data"><thead><tr><th>Uso</th><th class="num">Hora más barata<br><small>${C.rangoHora(st.minH)}</small></th><th class="num">Hora más cara<br><small>${C.rangoHora(st.maxH)}</small></th></tr></thead><tbody>${items.map(([label, kwh, href]) => `<tr><td>${href ? `<a href="${href}">${label}</a>` : label}</td><td class="num">${C.eurAuto(kwh * conImp(st.min))}</td><td class="num">${C.eurAuto(kwh * conImp(st.max))}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function productosAhorro() {
+  return `<section class="affiliate"><h2 class="h3">Herramientas que ayudan a gastar menos</h2><div class="prod-grid">${PRODUCTOS_AHORRO.map((p) => `<a class="prod" href="${esc(amazonUrl(p.q))}" ${amazonAttrs}><strong>${esc(p.t)}</strong><span>${esc(p.d)}</span><em>Ver en Amazon →</em></a>`).join('')}</div>${MON.amazonTag ? '<p class="disclosure">Enlaces de afiliado: si compras a través de ellos, la web recibe una pequeña comisión sin coste extra para ti.</p>' : ''}</section>`;
+}
+
+function ofertaTarifa() {
+  const o = MON.ofertaTarifa || {};
+  return o.url ? `<aside class="promo"><p>${esc(o.texto || '¿Pagas demasiado de luz? Compara tu tarifa.')}</p><a class="btn" href="${esc(o.url)}" rel="sponsored noopener" target="_blank">Ver oferta</a></aside>` : '';
+}
+
+const articulo = (a) => `${a.art} ${a.nombre}`;
+const usando = (a) => (a.art === 'una' ? 'Usándola' : 'Usándolo');
+const duracion = (h) => (h < 1 ? `${Math.round(h * 60)} minutos` : h === 1 ? '1 hora' : `${C.fmt(h, h % 1 ? 1 : 0)} horas`);
+const preciosHoyData = (date) => {
+  const st = C.dayStats(PRICES[date]);
+  return { media: conImp(st.avg), min: conImp(st.min), max: conImp(st.max) };
+};
+
+// ---------------------------------------------------------------- páginas de precio
+function dayPageCommon(date) {
+  const values = PRICES[date];
+  const st = C.dayStats(values);
+  const prev = PRICES[C.addDays(date, -1)] ? dayAvg(C.addDays(date, -1)) : null;
+  const diff = prev ? ((st.avg - prev) / prev) * 100 : null;
+  const vs30 = ((st.avg - MEDIA30) / MEDIA30) * 100;
+  const cmp = `${diff != null ? `un <strong>${C.fmt(Math.abs(diff), 1)} % ${diff >= 0 ? 'más caro' : 'más barato'}</strong> que el día anterior y ` : ''}un ${C.fmt(Math.abs(vs30), 1)} % ${vs30 >= 0 ? 'por encima' : 'por debajo'} de la media de los últimos 30 días`;
+  return { values, st, cmp };
+}
+
+function buildHome() {
+  const date = LATEST;
+  const { values, st, cmp } = dayPageCommon(date);
+  const esHoy = date === TODAY;
+  const tomorrowTeaser = HAS_TOMORROW ? (() => {
+    const t = C.dayStats(PRICES[TOMORROW]);
+    const d = ((t.avg - st.avg) / st.avg) * 100;
+    return `<a class="teaser" href="/precio-luz-manana/"><strong>Mañana, ${C.fechaCorta(TOMORROW)}:</strong> precio medio ${p3(t.avg)} €/kWh (${d >= 0 ? '+' : ''}${C.fmt(d, 1)} %). Hora más barata ${C.rangoHora(t.minH)} →</a>`;
+  })() : '<a class="teaser" href="/precio-luz-manana/">El precio de mañana se publica hacia las 20:30. Ver precio de la luz mañana →</a>';
+  const populares = ['radiador-de-aceite', 'calefactor', 'bomba-de-calor', 'freidora-de-aire', 'horno', 'lavadora', 'secadora', 'termo-electrico', 'aire-acondicionado', 'frigorifico', 'coche-electrico', 'vitroceramica'];
+  const faq = faqBlock([
+    ['¿Qué es el PVPC?', 'Es el Precio Voluntario para el Pequeño Consumidor, la tarifa regulada de la luz en España. Su precio cambia cada hora y Red Eléctrica lo publica cada tarde para el día siguiente. Lo ofrecen solo las comercializadoras de referencia.'],
+    ['¿Los precios incluyen impuestos?', `No. Los precios por hora son el término de energía del PVPC (energía, peajes y cargos) sin impuestos. Para saber lo que pagas por cada kWh súmale el impuesto eléctrico (${C.fmt(IMP.impuestoElectrico * 100, 2)} %) y el IVA (${C.fmt(IMP.iva * 100, 0)} %): aproximadamente un 27 % más. En las calculadoras de la web ya están incluidos.`],
+    ['¿A qué hora se publica el precio de la luz de mañana?', 'Red Eléctrica publica el PVPC del día siguiente hacia las 20:15-20:30. Esta web se actualiza automáticamente poco después.'],
+    ['¿Por qué las horas centrales son a veces las más baratas?', 'Por la producción solar: entre las 12:00 y las 17:00 hay mucha energía fotovoltaica, que tiene un coste de producción muy bajo y abarata el mercado mayorista. Por la tarde-noche, cuando cae el sol y sube la demanda, los precios suelen ser los más altos.'],
+    ['¿Me afecta si tengo tarifa de mercado libre?', 'Si tienes un precio fijo, no: pagas lo mismo a cualquier hora (o según tus tramos, si tu tarifa tiene discriminación horaria). Estos precios sí te sirven para comparar si tu tarifa te compensa.'],
+  ]);
+  const body = `
+<section class="hero">
+<p class="eyebrow">Tarifa regulada PVPC 2.0TD · ${esHoy ? 'actualizado hoy' : `datos del ${C.fechaCorta(date)}`}</p>
+<h1>Precio de la luz hoy por horas</h1>
+<p class="lead" id="pb-date">${cap(C.fechaLarga(date, true))}. El precio medio es de <strong>${p3(st.avg)} €/kWh</strong>, ${cmp}.</p>
+<div id="ahora" class="now-box" hidden></div>
+</section>
+${priceBlock(date, values)}
+${tomorrowTeaser}
+${ofertaTarifa()}
+<section class="card"><h2 class="h3">¿Cuánto cuesta hoy usar…?</h2><p class="muted">Coste con impuestos según la hora en la que lo uses.</p>
+${costeHoyLista(date, [
+    ['Una lavadora (programa ECO)', 0.7, '/cuanto-gasta/lavadora/'],
+    ['El lavavajillas (ECO)', 0.8, '/cuanto-gasta/lavavajillas/'],
+    ['Una secadora de bomba de calor', 1.5, '/cuanto-gasta/secadora/'],
+    ['1 hora de horno', 1.1, '/cuanto-gasta/horno/'],
+    ['1 hora de radiador de 2.000 W', 1.2, '/cuanto-gasta/radiador-de-aceite/'],
+    ['Cargar el coche para 100 km', 18, '/cuanto-gasta/coche-electrico/'],
+  ])}
+<p><a href="/mejor-hora/">Ver la mejor hora para cada electrodoméstico →</a></p></section>
+${tableBlock(date, values)}
+<section><h2>¿Cuánto gasta cada aparato?</h2><div class="grid-cards">${populares.map((s) => applianceCard(APARATOS.find((a) => a.slug === s))).join('')}</div><p><a href="/cuanto-gasta/">Ver los ${APARATOS.length} aparatos →</a></p></section>
+<section class="prose"><h2>Cómo leer el precio de la luz de hoy</h2>
+<p>Los precios de esta página son los del <strong>PVPC</strong> (tarifa regulada) para hoy, publicados por Red Eléctrica de España. Cada barra del gráfico es el precio de una hora en €/kWh: en verde las horas más baratas del día, en rojo las más caras. La línea discontinua marca la media del día.</p>
+<p>Si tienes PVPC, mover la lavadora, el lavavajillas, la secadora, el termo o la carga del coche a las horas verdes puede reducir su coste a la mitad o menos. Si tienes una tarifa de precio fijo de mercado libre, estos precios no afectan a tu factura, pero te sirven para saber si tu tarifa es competitiva (<a href="/guias/pvpc-o-mercado-libre/">PVPC o mercado libre</a>).</p>
+<p>Consulta también los <a href="/guias/horario-luz-tramos-punta-llano-valle/">tramos horarios punta, llano y valle</a> y el <a href="/precio-luz/">histórico del precio de la luz</a>.</p></section>
+${faq.html}
+<section><h2>Guías</h2><ul class="link-list">${GUIAS.slice(0, 6).map((g) => `<li><a href="/guias/${g.slug}/">${esc(g.titulo)}</a> <span class="muted">— ${esc(g.resumen)}</span></li>`).join('')}</ul></section>
+${productosAhorro()}`;
+  write('/', layout({
+    title: `Precio de la luz hoy por horas, ${C.fechaCorta(date)} | ${CFG.siteName}`,
+    desc: `Precio de la luz hoy ${C.fechaLarga(date)} (PVPC): media ${p3(st.avg)} €/kWh, hora más barata ${C.rangoHora(st.minH)}. Gráfico por horas y cuánto gasta cada aparato.`,
+    urlPath: '/', body,
+    jsonld: [
+      { '@context': 'https://schema.org', '@type': 'WebSite', name: CFG.siteName, url: SITE + '/', inLanguage: 'es-ES' },
+      faq.ld,
+    ],
+    pageData: { type: 'day', date, values, live: true },
+  }), { priority: '1.0' });
+}
+
+function buildTomorrow() {
+  const date = HAS_TOMORROW ? TOMORROW : null;
+  const titleDate = C.fechaCorta(TOMORROW);
+  let body;
+  if (date) {
+    const { values, st, cmp } = dayPageCommon(date);
+    body = `<section class="hero"><p class="eyebrow">Tarifa PVPC 2.0TD · publicado por Red Eléctrica</p><h1>Precio de la luz mañana</h1>
+<p class="lead" id="pb-date">${cap(C.fechaLarga(date, true))}. El precio medio será de <strong>${p3(st.avg)} €/kWh</strong>, ${cmp}.</p></section>
+${priceBlock(date, values)}${ofertaTarifa()}${tableBlock(date, values)}`;
+  } else {
+    body = `<section class="hero"><p class="eyebrow">Tarifa PVPC 2.0TD</p><h1>Precio de la luz mañana</h1>
+<p class="lead" id="pb-date">El precio de la luz para ${C.fechaLarga(TOMORROW, true)} se publica hacia las 20:15-20:30. Esta página se actualiza sola en cuanto esté disponible.</p></section>
+<div id="pending-tomorrow" class="card"><p>Mientras tanto, consulta el <a href="/">precio de la luz de hoy</a>.</p></div>`;
+  }
+  body += `<section class="prose"><h2>¿Cuándo se sabe el precio de la luz de mañana?</h2>
+<p>Red Eléctrica de España publica cada tarde, hacia las 20:15, los precios del PVPC para cada hora del día siguiente. Se calculan a partir del mercado mayorista (que cierra a mediodía) y de los peajes y cargos regulados. Si tienes PVPC, es el momento de planificar la lavadora, el lavavajillas, el termo o la carga del coche.</p>
+<p>¿Quieres saber exactamente cuándo poner cada aparato? Mira la <a href="/mejor-hora/">mejor hora para cada electrodoméstico</a>.</p></section>`;
+  write('/precio-luz-manana/', layout({
+    title: `Precio de la luz mañana, ${titleDate}, por horas`,
+    desc: date ? `Precio de la luz mañana ${C.fechaLarga(date)} (PVPC): media ${p3(C.dayStats(PRICES[date]).avg)} €/kWh. Horas más baratas y más caras.` : `Precio de la luz mañana ${C.fechaLarga(TOMORROW)} por horas (PVPC). Se publica hacia las 20:30.`,
+    urlPath: '/precio-luz-manana/', body,
+    crumbs: [['/precio-luz-manana/', 'Precio de la luz mañana']],
+    pageData: { type: 'day', date: date || TOMORROW, values: date ? PRICES[date] : null, live: true, tomorrow: true },
+  }), { priority: '0.9' });
+}
+
+function buildDayArchive() {
+  for (const date of DATES) {
+    const { values, st, cmp } = dayPageCommon(date);
+    const prev = PRICES[C.addDays(date, -1)] ? C.addDays(date, -1) : null;
+    const next = PRICES[C.addDays(date, 1)] ? C.addDays(date, 1) : null;
+    const ym = date.slice(0, 7);
+    const futuro = date > TODAY;
+    const body = `<section class="hero"><p class="eyebrow">Histórico PVPC 2.0TD</p>
+<h1>Precio de la luz el ${C.fechaLarga(date)}</h1>
+<p class="lead">${cap(C.DIAS[C.weekday(date)])}${C.esDiaValle(date) ? ' (todo el día en tramo valle)' : ''}. El precio medio ${futuro ? 'será' : 'fue'} de <strong>${p3(st.avg)} €/kWh</strong> sin impuestos, ${cmp}.</p></section>
+${priceBlock(date, values)}
+<section class="card"><h2 class="h3">Lo que ${futuro ? 'costará' : 'costó'} usar estos aparatos ese día</h2>
+${costeHoyLista(date, [['Una lavadora (ECO, 0,7 kWh)', 0.7], ['1 hora de horno (1,1 kWh)', 1.1], ['1 hora de radiador de 2.000 W (1,2 kWh)', 1.2], ['Cargar el coche para 100 km (18 kWh)', 18]])}</section>
+${tableBlock(date, values)}
+<nav class="pager">${prev ? `<a href="/precio-luz/${prev}/">← ${C.fechaCorta(prev)}</a>` : '<span></span>'}<a href="/precio-luz/${ym}/">${cap(C.mesLargo(ym))}</a>${next ? `<a href="/precio-luz/${next}/">${C.fechaCorta(next)} →</a>` : '<span></span>'}</nav>`;
+    write(`/precio-luz/${date}/`, layout({
+      title: `Precio de la luz el ${C.fechaLarga(date)} por horas`,
+      desc: `PVPC del ${C.fechaLarga(date)}: media ${p3(st.avg)} €/kWh, mínimo ${p3(st.min)} (${C.rangoHora(st.minH)}) y máximo ${p3(st.max)} (${C.rangoHora(st.maxH)}).`,
+      urlPath: `/precio-luz/${date}/`, body,
+      crumbs: [['/precio-luz/', 'Histórico'], [`/precio-luz/${ym}/`, cap(C.mesLargo(ym))], [`/precio-luz/${date}/`, C.fechaCorta(date)]],
+    }), { lastmod: date > TODAY ? TODAY : date, priority: '0.5' });
+  }
+}
+
+function monthStats(ym) {
+  const days = DATES.filter((d) => d.startsWith(ym));
+  const avgs = days.map((d) => ({ d, avg: dayAvg(d), st: C.dayStats(PRICES[d]) }));
+  const avg = avgs.reduce((a, x) => a + x.avg, 0) / avgs.length;
+  const sorted = [...avgs].sort((a, b) => a.avg - b.avg);
+  // perfil horario medio (24 h)
+  const prof = Array.from({ length: 24 }, () => []);
+  for (const d of days) { const st = C.dayStats(PRICES[d]); st.p.forEach((v, i) => prof[st.labels[i]].push(v)); }
+  const profile = prof.map((arr) => arr.reduce((a, b) => a + b, 0) / arr.length);
+  return { days, avgs, avg, cheapest: sorted[0], priciest: sorted.at(-1), profile };
+}
+
+function buildMonths() {
+  const all = MONTHS.map((ym) => ({ ym, ...monthStats(ym) }));
+  for (const m of all) {
+    const i = MONTHS.indexOf(m.ym);
+    const prevM = all[i - 1];
+    const lastYear = all.find((x) => x.ym === `${Number(m.ym.slice(0, 4)) - 1}${m.ym.slice(4)}`);
+    const dChart = C.barChart(m.avgs.map((x) => ({
+      v: x.avg, label: x.d.slice(8), cls: x.avg < m.avg * 0.9 ? 'b' : x.avg > m.avg * 1.1 ? 'c' : 'm',
+      title: `${C.fechaCorta(x.d)}: ${p3(x.avg)} €/kWh`, href: `/precio-luz/${x.d}/`,
+    })), { ariaLabel: `Precio medio diario en ${C.mesLargo(m.ym)}`, labelEvery: 3, refLine: m.avg });
+    const pChart = C.barChart(m.profile.map((v, h) => ({ v, label: C.pad(h), cls: v < m.avg * 0.85 ? 'b' : v > m.avg * 1.15 ? 'c' : 'm', title: `${C.rangoHora(h)}: ${p3(v)} €/kWh de media` })), { ariaLabel: 'Precio medio por hora del día', refLine: m.avg });
+    const bestH = m.profile.indexOf(Math.min(...m.profile));
+    const worstH = m.profile.indexOf(Math.max(...m.profile));
+    const cmpTxt = [
+      prevM ? `${m.avg >= prevM.avg ? 'un ' + C.fmt(((m.avg - prevM.avg) / prevM.avg) * 100, 1) + ' % más caro' : 'un ' + C.fmt(((prevM.avg - m.avg) / prevM.avg) * 100, 1) + ' % más barato'} que ${C.mesLargo(prevM.ym)} (${p3(prevM.avg)} €/kWh)` : null,
+      lastYear ? `${m.avg >= lastYear.avg ? 'un ' + C.fmt(((m.avg - lastYear.avg) / lastYear.avg) * 100, 1) + ' % más caro' : 'un ' + C.fmt(((lastYear.avg - m.avg) / lastYear.avg) * 100, 1) + ' % más barato'} que el mismo mes del año anterior` : null,
+    ].filter(Boolean).join(' y ');
+    const enCurso = m.ym === TODAY.slice(0, 7);
+    const body = `<section class="hero"><p class="eyebrow">Histórico PVPC 2.0TD</p><h1>Precio de la luz en ${C.mesLargo(m.ym)}</h1>
+<p class="lead">${enCurso ? `En lo que va de mes (${m.days.length} días con datos), el` : 'El'} precio medio del PVPC ${enCurso ? 'es' : 'fue'} de <strong>${p3(m.avg)} €/kWh</strong> sin impuestos (${p3(conImp(m.avg))} €/kWh con impuestos)${cmpTxt ? ', ' + cmpTxt : ''}.</p></section>
+<div class="stats">
+<div class="stat"><span class="k">Media del mes</span><span class="v">${p3(m.avg)}</span><span class="s">€/kWh</span></div>
+<div class="stat stat-b"><span class="k">Día más barato</span><span class="v">${p3(m.cheapest.avg)}</span><span class="s"><a href="/precio-luz/${m.cheapest.d}/">${C.fechaCorta(m.cheapest.d)}</a></span></div>
+<div class="stat stat-c"><span class="k">Día más caro</span><span class="v">${p3(m.priciest.avg)}</span><span class="s"><a href="/precio-luz/${m.priciest.d}/">${C.fechaCorta(m.priciest.d)}</a></span></div>
+</div>
+<div class="card chart-card"><h2 class="h3">Precio medio de cada día</h2>${dChart}<p class="muted">Pulsa en una barra para ver el detalle por horas de ese día.</p></div>
+<div class="card chart-card"><h2 class="h3">¿A qué hora fue más barata la luz?</h2>${pChart}<p>De media, la hora más barata del mes ${enCurso ? 'está siendo' : 'fue'} la de las <strong>${C.rangoHora(bestH)}</strong> (${p3(m.profile[bestH])} €/kWh) y la más cara la de las <strong>${C.rangoHora(worstH)}</strong> (${p3(m.profile[worstH])} €/kWh).</p></div>
+<div class="card"><h2 class="h3">Todos los días</h2><div class="table-wrap"><table class="data"><thead><tr><th>Día</th><th class="num">Media</th><th class="num">Mínimo</th><th class="num">Máximo</th></tr></thead><tbody>
+${m.avgs.map((x) => `<tr><td><a href="/precio-luz/${x.d}/">${cap(C.DIAS[C.weekday(x.d)]).slice(0, 3)} ${x.d.slice(8)}</a></td><td class="num">${p3(x.avg)}</td><td class="num">${p3(x.st.min)}</td><td class="num">${p3(x.st.max)}</td></tr>`).join('')}
+</tbody></table></div></div>
+<nav class="pager">${prevM ? `<a href="/precio-luz/${prevM.ym}/">← ${cap(C.mesLargo(prevM.ym))}</a>` : '<span></span>'}<a href="/precio-luz/">Histórico</a>${all[i + 1] ? `<a href="/precio-luz/${all[i + 1].ym}/">${cap(C.mesLargo(all[i + 1].ym))} →</a>` : '<span></span>'}</nav>`;
+    write(`/precio-luz/${m.ym}/`, layout({
+      title: `Precio de la luz en ${C.mesLargo(m.ym)}: media y días más baratos`,
+      desc: `PVPC de ${C.mesLargo(m.ym)}: precio medio ${p3(m.avg)} €/kWh. Día más barato ${C.fechaCorta(m.cheapest.d)}, más caro ${C.fechaCorta(m.priciest.d)} y precio medio por horas.`,
+      urlPath: `/precio-luz/${m.ym}/`, body,
+      crumbs: [['/precio-luz/', 'Histórico'], [`/precio-luz/${m.ym}/`, cap(C.mesLargo(m.ym))]],
+    }), { lastmod: enCurso ? TODAY : C.addDays(`${m.ym}-01`, 31) > TODAY ? TODAY : m.days.at(-1), priority: '0.6' });
+  }
+  // índice
+  const chart = C.barChart(all.map((m) => ({ v: m.avg, label: `${C.MESES[Number(m.ym.slice(5)) - 1].slice(0, 3)}${m.ym.endsWith('-01') || m === all[0] ? ` ${m.ym.slice(2, 4)}` : ''}`, cls: 'm', title: `${C.mesLargo(m.ym)}: ${p3(m.avg)} €/kWh`, href: `/precio-luz/${m.ym}/` })), { ariaLabel: 'Precio medio mensual del PVPC', labelEvery: 1 });
+  const year12 = PAST.slice(-365);
+  const avg12 = year12.reduce((a, d) => a + dayAvg(d), 0) / year12.length;
+  const body = `<section class="hero"><p class="eyebrow">PVPC 2.0TD · datos de Red Eléctrica</p><h1>Histórico del precio de la luz</h1>
+<p class="lead">Precio medio del PVPC mes a mes. En los últimos 12 meses la media ha sido de <strong>${p3(avg12)} €/kWh</strong> sin impuestos (${p3(conImp(avg12))} €/kWh con impuestos), y en los últimos 30 días de <strong>${p3(MEDIA30)} €/kWh</strong>.</p></section>
+<div class="card chart-card"><h2 class="h3">Precio medio mensual (€/kWh)</h2>${chart}</div>
+<div class="card"><div class="table-wrap"><table class="data"><thead><tr><th>Mes</th><th class="num">Media €/kWh</th><th>Día más barato</th><th>Día más caro</th></tr></thead><tbody>
+${[...all].reverse().map((m) => `<tr><td><a href="/precio-luz/${m.ym}/">${cap(C.mesLargo(m.ym))}</a></td><td class="num">${p3(m.avg)}</td><td><a href="/precio-luz/${m.cheapest.d}/">${C.fechaCorta(m.cheapest.d)}</a> (${p3(m.cheapest.avg)})</td><td><a href="/precio-luz/${m.priciest.d}/">${C.fechaCorta(m.priciest.d)}</a> (${p3(m.priciest.avg)})</td></tr>`).join('')}
+</tbody></table></div></div>
+<section class="prose"><h2>Descarga los datos</h2><p>Puedes descargar todos los precios horarios del PVPC recopilados en esta web en formato CSV: <a href="/datos/pvpc.csv">pvpc.csv</a>. Fuente original: Red Eléctrica de España (REData).</p></section>`;
+  write('/precio-luz/', layout({
+    title: 'Histórico del precio de la luz (PVPC) mes a mes',
+    desc: `Evolución del precio de la luz PVPC: media de los últimos 12 meses ${p3(avg12)} €/kWh. Precio medio de cada mes, días más baratos y más caros.`,
+    urlPath: '/precio-luz/', body, crumbs: [['/precio-luz/', 'Histórico del precio de la luz']],
+  }), { priority: '0.7' });
+}
+
+// ---------------------------------------------------------------- mejor hora
+const MEJOR_HORA = [
+  { slug: 'lavadora', nombre: 'poner la lavadora', horas: 2, kwh: 0.7, aparato: 'lavadora', nota: 'Un lavado típico dura entre 1 y 3 horas; calculamos la mejor franja de 2 horas.' },
+  { slug: 'lavavajillas', nombre: 'poner el lavavajillas', horas: 3, kwh: 0.8, aparato: 'lavavajillas', nota: 'El programa ECO suele durar unas 3 horas.' },
+  { slug: 'secadora', nombre: 'poner la secadora', horas: 2, kwh: 1.5, aparato: 'secadora', nota: 'Un secado completo dura entre 1,5 y 3 horas.' },
+  { slug: 'plancha', nombre: 'planchar', horas: 1, kwh: 1.2, aparato: 'plancha', nota: 'Una hora de plancha a vapor.' },
+  { slug: 'horno', nombre: 'usar el horno', horas: 1, kwh: 1.1, aparato: 'horno', nota: 'Una hora de horno a 180-200 °C con precalentamiento.' },
+  { slug: 'coche-electrico', nombre: 'cargar el coche eléctrico', horas: 5, kwh: 18, aparato: 'coche-electrico', nota: 'Carga de unos 18 kWh (100 km) con un cargador de 3,7 kW: unas 5 horas.' },
+  { slug: 'termo-electrico', nombre: 'calentar el termo', horas: 3, kwh: 3.6, aparato: 'termo-electrico', nota: 'Un termo de 80 litros necesita unas 2-3 horas para recuperar el agua caliente de una pareja.' },
+];
+
+function mejorHoraContent(m, date) {
+  const st = C.dayStats(PRICES[date]);
+  const best = C.bestWindow(st.p, m.horas);
+  const worst = C.worstWindow(st.p, m.horas);
+  const cBest = m.kwh * conImp(best.avg), cWorst = m.kwh * conImp(worst.avg), cAvg = m.kwh * conImp(st.avg);
+  const ahorro = ((cWorst - cBest) / cWorst) * 100;
+  // top 3 franjas que no se solapan
+  const tops = [];
+  const used = new Set();
+  const cand = [];
+  for (let i = 0; i + m.horas <= st.p.length; i++) cand.push({ start: i, end: i + m.horas, avg: st.p.slice(i, i + m.horas).reduce((a, b) => a + b, 0) / m.horas });
+  cand.sort((a, b) => a.avg - b.avg);
+  for (const c of cand) {
+    if (tops.length === 3) break;
+    let ok = true;
+    for (let j = c.start; j < c.end; j++) if (used.has(j)) ok = false;
+    if (!ok) continue;
+    for (let j = c.start; j < c.end; j++) used.add(j);
+    tops.push(c);
+  }
+  const items = st.p.map((v, i) => ({ v, label: C.pad(st.labels[i]), cls: i >= best.start && i < best.end ? 'b' : 'm', title: `${C.rangoHora(st.labels[i])}: ${p3(v)} €/kWh` }));
+  return {
+    best, html: `<div class="answer"><p class="big">${C.windowLabel(st.labels, best)}</p><p>Es la franja de ${m.horas === 1 ? '1 hora' : `${m.horas} horas`} más barata del ${C.fechaLarga(date, true)}: <strong>${p3(best.avg)} €/kWh</strong> de media.</p></div>
+<div class="stats">
+<div class="stat stat-b"><span class="k">En la mejor franja</span><span class="v">${C.eurAuto(cBest)}</span><span class="s">${C.windowLabel(st.labels, best)}</span></div>
+<div class="stat"><span class="k">A precio medio del día</span><span class="v">${C.eurAuto(cAvg)}</span><span class="s">${p3(st.avg)} €/kWh</span></div>
+<div class="stat stat-c"><span class="k">En la peor franja</span><span class="v">${C.eurAuto(cWorst)}</span><span class="s">${C.windowLabel(st.labels, worst)}</span></div>
+</div>
+<p>Elegir bien la hora ahorra un <strong>${C.fmt(ahorro, 0)} %</strong> frente a la peor franja del día (${C.fmt(m.kwh, m.kwh < 10 ? 1 : 0)} kWh, coste con impuestos).</p>
+<div class="card chart-card"><h3>Precio por horas y mejor franja</h3>${C.barChart(items, { ariaLabel: 'Precio por horas con la mejor franja resaltada', refLine: st.avg })}</div>
+<div class="card"><h3>Las 3 mejores franjas</h3><ol class="tops">${tops.map((t) => `<li><strong>${C.windowLabel(st.labels, t)}</strong> · ${p3(t.avg)} €/kWh · ${C.eurAuto(m.kwh * conImp(t.avg))}</li>`).join('')}</ol></div>`,
+  };
+}
+
+function buildMejorHora() {
+  for (const m of MEJOR_HORA) {
+    const a = APARATOS.find((x) => x.slug === m.aparato);
+    const hoy = mejorHoraContent(m, LATEST);
+    const man = HAS_TOMORROW ? mejorHoraContent(m, TOMORROW) : null;
+    const body = `<section class="hero"><p class="eyebrow">Tarifa PVPC · ${C.fechaLarga(LATEST, true)}</p><h1>Mejor hora para ${m.nombre} hoy</h1>
+<p class="lead">${m.nota} Calculamos cada día la franja más barata con los precios oficiales del PVPC.</p>
+<div id="ahora-ventana" class="now-box" hidden data-horas="${m.horas}" data-kwh="${m.kwh}"></div></section>
+<h2>Hoy, ${C.fechaCorta(LATEST)}</h2>${hoy.html}
+${man ? `<h2>Mañana, ${C.fechaCorta(TOMORROW)}</h2>${man.html}` : '<p class="card">La mejor hora de mañana estará disponible a partir de las 20:30, cuando Red Eléctrica publique los precios.</p>'}
+<section class="prose"><h2>Consejos</h2><ul>
+<li>Usa el <strong>inicio diferido</strong> del electrodoméstico para que arranque a la hora indicada aunque no estés en casa.</li>
+<li>Los fines de semana y festivos todas las horas son tramo valle, pero con PVPC sigue habiendo diferencias entre horas.</li>
+<li>Si tienes una tarifa de precio fijo, la hora da igual para el precio; si tienes tres periodos, usa el valle (00:00-08:00 y fines de semana).</li>
+</ul><p>Más detalles sobre su consumo: <a href="/cuanto-gasta/${a.slug}/">¿cuánto gasta ${articulo(a)}?</a></p></section>`;
+    write(`/mejor-hora/${m.slug}/`, layout({
+      title: `Mejor hora para ${m.nombre} hoy, ${C.fechaCorta(LATEST)}`,
+      desc: `La hora más barata para ${m.nombre} hoy ${C.fechaLarga(LATEST)} es de ${C.windowLabel(C.dayStats(PRICES[LATEST]).labels, hoy.best)} con tarifa PVPC. Coste y ahorro calculados.`,
+      urlPath: `/mejor-hora/${m.slug}/`, body,
+      crumbs: [['/mejor-hora/', 'Mejor hora'], [`/mejor-hora/${m.slug}/`, cap(m.nombre)]],
+      pageData: { type: 'mejorhora', date: LATEST, values: PRICES[LATEST], horas: m.horas, kwh: m.kwh, imp: IMP },
+    }), { priority: '0.8' });
+  }
+  const st = C.dayStats(PRICES[LATEST]);
+  const body = `<section class="hero"><h1>Mejor hora para usar cada electrodoméstico hoy</h1><p class="lead">${cap(C.fechaLarga(LATEST, true))}. Franjas más baratas según el PVPC de hoy.</p></section>
+<div class="table-wrap"><table class="data"><thead><tr><th>Aparato</th><th>Mejor franja hoy</th><th class="num">Coste</th></tr></thead><tbody>
+${MEJOR_HORA.map((m) => { const w = C.bestWindow(st.p, m.horas); return `<tr><td><a href="/mejor-hora/${m.slug}/">${cap(m.nombre)}</a></td><td>${C.windowLabel(st.labels, w)}</td><td class="num">${C.eurAuto(m.kwh * conImp(w.avg))}</td></tr>`; }).join('')}
+</tbody></table></div>`;
+  write('/mejor-hora/', layout({
+    title: `Mejor hora para poner la lavadora, el lavavajillas y más hoy`,
+    desc: `Las franjas más baratas de hoy ${C.fechaLarga(LATEST)} para lavadora, lavavajillas, secadora, horno, termo y coche eléctrico con tarifa PVPC.`,
+    urlPath: '/mejor-hora/', body, crumbs: [['/mejor-hora/', 'Mejor hora']],
+  }), { priority: '0.8' });
+}
+
+// ---------------------------------------------------------------- aparatos
+function paramsAparato(a) {
+  return {
+    modo: a.modo, potencia: a.potencia, ciclo: a.ciclo ?? 1, horas: a.horas, dias: a.dias, diasAnio: a.diasAnio,
+    kwhCiclo: a.kwhCiclo, usosSemana: a.usosSemana, kwhAnio: a.kwhAnio,
+  };
+}
+
+function applianceCard(a) {
+  const c = C.calcCoste(paramsAparato(a), MEDIA30_CON);
+  const sub = a.modo === 'potencia' ? `${C.eurAuto(c.unidad)}/hora` : a.modo === 'ciclo' ? `${C.eurAuto(c.unidad)}/${a.unidad}` : `${C.eurAuto(c.mes)}/mes`;
+  return `<a class="app-card" href="/cuanto-gasta/${a.slug}/"><strong>${esc(cap(a.corto || a.nombre))}</strong><span>${sub}</span></a>`;
+}
+
+function respuestaRapida(a, c) {
+  const precio = `con el precio medio de la luz de los últimos 30 días (${p3(MEDIA30_CON)} €/kWh con impuestos)`;
+  if (a.modo === 'potencia') {
+    const real = a.ciclo < 1 ? ` de uso real (el termostato ${a.art === 'una' ? 'la' : 'lo'} desconecta a ratos)` : '';
+    return `${cap(articulo(a))} de ${C.watts(a.potencia)} consume unos <strong>${C.kwh(c.kwhUnidad)} por hora</strong>${real}, lo que supone <strong>${C.eurAuto(c.unidad)} por hora</strong> ${precio}. ${usando(a)} ${duracion(a.horas)} al día${a.dias < 30 ? `, ${a.dias} días al mes,` : ''} el gasto es de unos <strong>${C.eurAuto(c.mes)} al mes</strong>.`;
+  }
+  if (a.modo === 'ciclo') {
+    const preset = a.presets.find((x) => x[1] === a.kwhCiclo);
+    return `${cap(articulo(a))} consume unos <strong>${C.kwh(a.kwhCiclo)} por ${a.unidad}</strong>${preset ? ` (${preset[0]})` : ''}: <strong>${C.eurAuto(c.unidad)}</strong> ${precio}. ${a.unidad === 'día' ? `Al mes, unos <strong>${C.eurAuto(c.mes)}</strong>.` : `Con ${C.fmt(a.usosSemana, a.usosSemana % 1 ? 1 : 0)} ${a.unidadPlural} por semana, unos <strong>${C.eurAuto(c.mes)} al mes</strong>.`}`;
+  }
+  const preset = a.presets.find((x) => x[1] === a.kwhAnio);
+  return `${cap(articulo(a))} típico${preset ? ` (${preset[0]})` : ''} consume unos <strong>${C.fmtInt(a.kwhAnio)} kWh al año</strong>, ${C.kwh(c.kwhDia)} al día: <strong>${C.eurAuto(c.mes)} al mes</strong> y ${C.eurAuto(c.anio)} al año ${precio}.`;
+}
+
+function tablasAparato(a) {
+  const P = MEDIA30_CON;
+  const base = paramsAparato(a);
+  if (a.modo === 'potencia') {
+    const t1 = `<h2>¿Cuánto gasta según su potencia?</h2><div class="table-wrap"><table class="data"><thead><tr><th>${a.etiquetaPotencia || 'Potencia'}</th><th class="num">kWh por hora</th><th class="num">€ por hora</th><th class="num">€ al mes*</th></tr></thead><tbody>
+${a.potencias.map((w) => { const c = C.calcCoste({ ...base, potencia: w }, P); return `<tr${w === a.potencia ? ' class="hl"' : ''}><td>${C.watts(w)}</td><td class="num">${C.fmt(c.kwhUnidad, 2)}</td><td class="num">${C.eurAuto(c.unidad)}</td><td class="num">${C.eurAuto(c.mes)}</td></tr>`; }).join('')}
+</tbody></table></div><p class="muted">*${duracion(a.horas)} al día, ${a.dias} días al mes${a.ciclo < 1 ? `, funcionando a plena potencia el ${Math.round(a.ciclo * 100)} % del tiempo` : ''}. Precio: ${p3(P)} €/kWh con impuestos (media PVPC de los últimos 30 días).</p>`;
+    const horas = [...new Set([0.5, 1, 2, 4, 6, 8, a.horas].filter((h) => h <= 24))].sort((x, y) => x - y);
+    const t2 = `<h2>Gasto al mes según las horas de uso</h2><div class="table-wrap"><table class="data"><thead><tr><th>Uso diario</th><th class="num">kWh al mes</th><th class="num">€ al mes</th><th class="num">€ al año${a.diasAnio < 365 ? ` (${a.diasAnio} días)` : ''}</th></tr></thead><tbody>
+${horas.map((h) => { const c = C.calcCoste({ ...base, horas: h }, P); return `<tr${h === a.horas ? ' class="hl"' : ''}><td>${h < 1 ? `${Math.round(h * 60)} min` : `${C.fmt(h, h % 1 ? 1 : 0)} h`}</td><td class="num">${C.fmt(c.kwhMes, 1)}</td><td class="num">${C.eurAuto(c.mes)}</td><td class="num">${C.eurAuto(c.anio)}</td></tr>`; }).join('')}
+</tbody></table></div>`;
+    return t1 + t2;
+  }
+  if (a.modo === 'ciclo') {
+    return `<h2>¿Cuánto gasta según el uso?</h2><div class="table-wrap"><table class="data"><thead><tr><th>Tipo de uso</th><th class="num">kWh por ${esc(a.unidad)}</th><th class="num">€ por ${esc(a.unidad)}</th><th class="num">€ al mes*</th></tr></thead><tbody>
+${a.presets.map(([label, k]) => { const c = C.calcCoste({ ...base, kwhCiclo: k }, P); return `<tr${k === a.kwhCiclo ? ' class="hl"' : ''}><td>${esc(label)}</td><td class="num">${C.fmt(k, k < 0.1 ? 3 : 2)}</td><td class="num">${C.eurAuto(c.unidad)}</td><td class="num">${C.eurAuto(c.mes)}</td></tr>`; }).join('')}
+</tbody></table></div><p class="muted">*${C.fmt(a.usosSemana, a.usosSemana % 1 ? 1 : 0)} ${esc(a.unidadPlural)} por semana. Precio: ${p3(P)} €/kWh con impuestos (media PVPC de los últimos 30 días).</p>`;
+  }
+  return `<h2>¿Cuánto gasta según su clase energética?</h2><div class="table-wrap"><table class="data"><thead><tr><th>Tipo</th><th class="num">kWh al año</th><th class="num">€ al mes</th><th class="num">€ al año</th></tr></thead><tbody>
+${a.presets.map(([label, k]) => { const c = C.calcCoste({ ...base, kwhAnio: k }, P); return `<tr${k === a.kwhAnio ? ' class="hl"' : ''}><td>${esc(label)}</td><td class="num">${C.fmtInt(k)}</td><td class="num">${C.eurAuto(c.mes)}</td><td class="num">${C.eurAuto(c.anio)}</td></tr>`; }).join('')}
+</tbody></table></div><p class="muted">Precio: ${p3(P)} €/kWh con impuestos (media PVPC de los últimos 30 días).</p>`;
+}
+
+function calculadoraHtml(a, hoy) {
+  const cfg = { ...paramsAparato(a), unidad: a.unidad, presets: a.presets, potencias: a.potencias, precios: { media30: MEDIA30_CON, ...hoy } };
+  const c = C.calcCoste(paramsAparato(a), MEDIA30_CON);
+  const unidadLabel = a.modo === 'potencia' ? 'Por hora' : a.modo === 'ciclo' ? `Por ${a.unidad}` : 'Al día';
+  let inputs = '';
+  if (a.modo === 'potencia') {
+    inputs = `<label>${a.etiquetaPotencia || 'Potencia'} (W)<input type="number" name="potencia" min="1" step="1" value="${a.potencia}" inputmode="numeric"></label>
+<div class="chips" data-for="potencia">${a.potencias.map((w) => `<button type="button" data-v="${w}"${w === a.potencia ? ' aria-pressed="true"' : ''}>${C.watts(w)}</button>`).join('')}</div>
+<label>Horas al día<input type="number" name="horas" min="0" max="24" step="0.25" value="${a.horas}" inputmode="decimal"></label>
+<label>Días al mes<input type="number" name="dias" min="1" max="31" step="1" value="${a.dias}" inputmode="numeric"></label>
+<label>Funcionamiento real (%)<input type="number" name="ciclo" min="1" max="100" step="5" value="${Math.round((a.ciclo ?? 1) * 100)}" inputmode="numeric"><small>100 % si no tiene termostato.</small></label>`;
+  } else if (a.modo === 'ciclo') {
+    inputs = `<label>kWh por ${esc(a.unidad)}<input type="number" name="kwhCiclo" min="0" step="0.01" value="${a.kwhCiclo}" inputmode="decimal"></label>
+<div class="chips" data-for="kwhCiclo">${a.presets.map(([l, k]) => `<button type="button" data-v="${k}"${k === a.kwhCiclo ? ' aria-pressed="true"' : ''}>${esc(l)}</button>`).join('')}</div>
+<label>${cap(esc(a.unidadPlural))} por semana<input type="number" name="usosSemana" min="0" step="0.5" value="${a.usosSemana}" inputmode="decimal"></label>`;
+  } else {
+    inputs = `<label>Consumo anual (kWh/año, en la etiqueta)<input type="number" name="kwhAnio" min="1" step="1" value="${a.kwhAnio}" inputmode="numeric"></label>
+<div class="chips" data-for="kwhAnio">${a.presets.map(([l, k]) => `<button type="button" data-v="${k}"${k === a.kwhAnio ? ' aria-pressed="true"' : ''}>${esc(l)}</button>`).join('')}</div>`;
+  }
+  return `<form class="calc card" data-calc='${esc(JSON.stringify(cfg))}' onsubmit="return false">
+<h2 class="h3">Calcula lo que te cuesta a ti</h2>
+<div class="calc-grid">${inputs}
+<label>Precio de la luz (€/kWh con impuestos)<input type="number" name="precio" min="0" step="0.001" value="${MEDIA30_CON.toFixed(3)}" inputmode="decimal"></label>
+<div class="chips" data-for="precio">
+<button type="button" data-v="${MEDIA30_CON.toFixed(3)}" aria-pressed="true">Media 30 días</button>
+${hoy ? `<button type="button" data-v="${hoy.media.toFixed(3)}">Media de hoy</button><button type="button" data-v="${hoy.min.toFixed(3)}">Hora más barata hoy</button><button type="button" data-v="${hoy.max.toFixed(3)}">Hora más cara hoy</button>` : ''}
+</div>
+</div>
+<output class="calc-out">
+<div><span>${unidadLabel}</span><strong data-out="unidad">${C.eurAuto(c.unidad)}</strong><small data-out="kwhUnidad">${C.kwh(c.kwhUnidad)}</small></div>
+<div><span>Al mes</span><strong data-out="mes">${C.eurAuto(c.mes)}</strong><small data-out="kwhMes">${C.kwh(c.kwhMes)}</small></div>
+<div><span>Al año</span><strong data-out="anio">${C.eurAuto(c.anio)}</strong><small data-out="kwhAnio">${C.kwh(c.kwhAnio)}</small></div>
+</output>
+</form>`;
+}
+
+function buildAparatos() {
+  const hoy = preciosHoyData(LATEST);
+  const stHoy = C.dayStats(PRICES[LATEST]);
+  for (const a of APARATOS) {
+    const c = C.calcCoste(paramsAparato(a), MEDIA30_CON);
+    const nombreCorto = a.corto || a.nombre;
+    const h1 = a.titulo || `¿Cuánto gasta ${articulo(a)}?`;
+    // FAQ: dos calculadas + las escritas
+    const faqItems = [];
+    if (a.modo === 'potencia') {
+      faqItems.push([`¿Cuánto gasta ${articulo(a)} por hora?`, `Con una potencia de ${C.watts(a.potencia)}${a.ciclo < 1 ? ` y el termostato actuando (${Math.round(a.ciclo * 100)} % del tiempo a plena potencia)` : ''}, unos ${C.kwh(c.kwhUnidad)} por hora: ${C.eurAuto(c.unidad)} con el precio medio de la luz de los últimos 30 días.`]);
+      faqItems.push([`¿Cuánto gasta ${articulo(a)} al mes?`, `${usando(a)} ${duracion(a.horas)} al día durante ${a.dias} días, unos ${C.kwh(c.kwhMes)} al mes, es decir, ${C.eurAuto(c.mes)} con impuestos.`]);
+    } else if (a.modo === 'ciclo') {
+      faqItems.push([a.unidad === 'día' ? `¿Cuánto gasta ${articulo(a)} al día?` : `¿Cuánto cuesta cada ${a.unidad}?`, `Unos ${C.eurAuto(c.unidad)} (${C.kwh(a.kwhCiclo)}) con el precio medio de la luz de los últimos 30 días.${a.unidad === 'día' ? '' : ` En la hora más barata de hoy costaría ${C.eurAuto(a.kwhCiclo * hoy.min)} y en la más cara ${C.eurAuto(a.kwhCiclo * hoy.max)}.`}`]);
+    } else {
+      faqItems.push([`¿Cuánto gasta ${articulo(a)} al mes?`, `Uno de ${C.fmtInt(a.kwhAnio)} kWh/año consume unos ${C.kwh(c.kwhMes)} al mes: ${C.eurAuto(c.mes)} con el precio medio actual de la luz.`]);
+    }
+    faqItems.push(...a.faq);
+    const faq = faqBlock(faqItems);
+    const unaHora = a.modo === 'potencia' ? c.kwhUnidad : a.modo === 'ciclo' && a.unidad !== 'día' ? a.kwhCiclo : null;
+    const hoyBlock = unaHora != null ? `<section class="card"><h2 class="h3">Hoy, ${C.fechaCorta(LATEST)}: el precio cambia según la hora</h2>
+<p>${a.modo === 'potencia' ? `Una hora de ${esc(nombreCorto)} a ${C.watts(a.potencia)}` : `Cada ${esc(a.unidad)}`} cuesta hoy <strong>${C.eurAuto(unaHora * hoy.min)}</strong> en la hora más barata (${C.rangoHora(stHoy.minH)}) y <strong>${C.eurAuto(unaHora * hoy.max)}</strong> en la más cara (${C.rangoHora(stHoy.maxH)}), con tarifa PVPC e impuestos incluidos.${a.mejorHora ? ` <a href="/mejor-hora/${a.mejorHora}/">Ver la mejor hora de hoy →</a>` : ' <a href="/">Ver el precio de la luz de hoy →</a>'}</p></section>` : '';
+    const rel = a.rel.map((s) => APARATOS.find((x) => x.slug === s)).filter(Boolean);
+    const body = `<article>
+<h1>${esc(h1)}</h1>
+<div class="answer"><p>${respuestaRapida(a, c)}</p></div>
+${calculadoraHtml(a, hoy)}
+${hoyBlock}
+${tablasAparato(a)}
+<section class="prose"><h2>Cómo funciona y cuánto consume</h2>${a.intro}
+<h2>¿De qué depende su consumo?</h2><ul>${a.depende.map((x) => `<li>${x}</li>`).join('')}</ul>
+<h2>Consejos para que gaste menos</h2><ul>${a.consejos.map((x) => `<li>${x}</li>`).join('')}</ul></section>
+<aside class="affiliate card"><h2 class="h3">¿Vas a comprar ${articulo(a)}?</h2><p>Antes de elegir, fíjate en la etiqueta energética (kWh/año o por ciclo) y en la potencia: con la calculadora de arriba puedes estimar su coste real.</p><a class="btn" href="${esc(amazonUrl(a.amazon))}" ${amazonAttrs}>Ver ${esc(a.plural)} en Amazon</a>${MON.amazonTag ? '<p class="disclosure">Enlace de afiliado.</p>' : ''}</aside>
+${faq.html}
+<section><h2>Otros aparatos que te pueden interesar</h2><div class="grid-cards">${rel.map(applianceCard).join('')}</div></section>
+${productosAhorro()}
+<p class="muted method">Cálculos con el precio medio PVPC de los últimos 30 días (${p3(MEDIA30)} €/kWh sin impuestos; ${p3(MEDIA30_CON)} €/kWh con impuesto eléctrico e IVA), actualizado el ${C.fechaLarga(TODAY)}. Las potencias y consumos son valores típicos del mercado: para tu caso concreto, consulta la placa de características o mide con un enchufe medidor. <a href="/guias/como-calcular-consumo-electrico/">Cómo lo calculamos</a>.</p>
+</article>`;
+    const title = a.titulo ? `${a.titulo} (${YEAR})` : `¿Cuánto gasta ${articulo(a)}? Coste por ${a.modo === 'ciclo' ? a.unidad : a.modo === 'anual' ? 'mes' : 'hora'} (${YEAR})`;
+    const desc = `${cap(articulo(a))}${a.modo === 'potencia' ? ` de ${C.watts(a.potencia)} gasta ${C.kwh(c.kwhUnidad)} por hora (${C.eurAuto(c.unidad)})` : a.modo === 'ciclo' ? ` gasta ${C.kwh(a.kwhCiclo)} por ${a.unidad} (${C.eurAuto(c.unidad)})` : ` gasta ${C.fmtInt(a.kwhAnio)} kWh al año (${C.eurAuto(c.mes)}/mes)`}. Calculadora con el precio de la luz de hoy, tablas y trucos para ahorrar.`;
+    write(`/cuanto-gasta/${a.slug}/`, layout({
+      title, desc, urlPath: `/cuanto-gasta/${a.slug}/`, body, ogType: 'article',
+      crumbs: [['/cuanto-gasta/', '¿Cuánto gasta?'], [`/cuanto-gasta/${a.slug}/`, cap(nombreCorto)]],
+      jsonld: [faq.ld],
+    }), { priority: '0.8' });
+  }
+  // índice
+  const cats = Object.entries(CATEGORIAS).map(([k, label]) => {
+    const list = APARATOS.filter((a) => a.cat === k);
+    return list.length ? `<section><h2>${label}</h2><div class="grid-cards">${list.map(applianceCard).join('')}</div></section>` : '';
+  }).join('');
+  write('/cuanto-gasta/', layout({
+    title: `¿Cuánto gasta? Consumo de ${APARATOS.length} electrodomésticos en euros`,
+    desc: `Cuánto gasta cada electrodoméstico por hora, por uso y al mes con el precio actual de la luz: calefacción, aire acondicionado, cocina, lavadora, termo, coche eléctrico y más.`,
+    urlPath: '/cuanto-gasta/',
+    body: `<section class="hero"><h1>¿Cuánto gasta cada aparato?</h1><p class="lead">Consumo y coste de ${APARATOS.length} electrodomésticos con el precio medio de la luz de los últimos 30 días (${p3(MEDIA30_CON)} €/kWh con impuestos). Cada página tiene una calculadora para tu caso concreto.</p></section>${cats}`,
+    crumbs: [['/cuanto-gasta/', '¿Cuánto gasta?']],
+  }), { priority: '0.9' });
+}
+
+// ---------------------------------------------------------------- calculadora general
+function buildCalculadora() {
+  const lista = APARATOS.map((a) => ({ s: a.slug, n: cap(a.corto || a.nombre), ...paramsAparato(a), unidad: a.unidad }));
+  const body = `<section class="hero"><h1>Calculadora de consumo eléctrico</h1>
+<p class="lead">Calcula cuántos kWh gasta un aparato y cuánto cuesta en euros, o suma todos los de tu casa para estimar tu factura mensual.</p></section>
+<form class="calc card" id="calc-simple" onsubmit="return false"><h2 class="h3">Un aparato: de vatios a euros</h2>
+<div class="calc-grid">
+<label>Potencia (W)<input type="number" name="potencia" value="2000" min="1" inputmode="numeric"></label>
+<label>Horas de uso al día<input type="number" name="horas" value="3" min="0" max="24" step="0.25" inputmode="decimal"></label>
+<label>Días al mes<input type="number" name="dias" value="30" min="1" max="31" inputmode="numeric"></label>
+<label>Precio (€/kWh con impuestos)<input type="number" name="precio" value="${MEDIA30_CON.toFixed(3)}" step="0.001" min="0" inputmode="decimal"></label>
+</div>
+<output class="calc-out">
+<div><span>Por hora</span><strong data-out="hora">—</strong><small data-out="kwhHora"></small></div>
+<div><span>Al mes</span><strong data-out="mes">—</strong><small data-out="kwhMes"></small></div>
+<div><span>Al año</span><strong data-out="anio">—</strong><small data-out="kwhAnio"></small></div>
+</output></form>
+<section class="card" id="calc-casa"><h2 class="h3">Toda la casa: estima tu factura</h2>
+<p class="muted">Añade tus aparatos y ajusta el uso. Solo incluye el término de energía (no la potencia contratada ni el alquiler del contador).</p>
+<div class="casa-add"><select id="casa-select" aria-label="Aparato">${lista.map((a) => `<option value="${a.s}">${esc(a.n)}</option>`).join('')}</select><button type="button" class="btn" id="casa-add">Añadir</button></div>
+<div class="table-wrap"><table class="data casa"><thead><tr><th>Aparato</th><th>Uso</th><th class="num">kWh/mes</th><th class="num">€/mes</th><th></th></tr></thead><tbody id="casa-body"></tbody>
+<tfoot><tr><th colspan="2">Total</th><th class="num" id="casa-kwh">0</th><th class="num" id="casa-eur">0 €</th><th></th></tr></tfoot></table></div>
+<p><label class="inline">Precio (€/kWh con impuestos) <input type="number" id="casa-precio" value="${MEDIA30_CON.toFixed(3)}" step="0.001" min="0"></label> <button type="button" class="btn btn-ghost" id="casa-share">Copiar enlace</button></p>
+<noscript><p>Esta calculadora necesita JavaScript.</p></noscript></section>
+<section class="prose"><h2>Cómo se calcula el consumo</h2>
+<p>La fórmula es <strong>kWh = W × horas ÷ 1.000</strong>, y el coste <strong>€ = kWh × precio del kWh</strong>. Un aparato de 2.000 W usado 3 horas consume 6 kWh. Para aparatos con termostato (radiadores, hornos), el consumo real es menor que la potencia porque no funcionan a tope todo el tiempo; en cada página de <a href="/cuanto-gasta/">¿cuánto gasta?</a> tienes valores típicos.</p>
+<p>El precio por defecto es la media del PVPC de los últimos 30 días con impuesto eléctrico e IVA. Si tienes tarifa fija, usa el precio del kWh de tu factura multiplicado por 1,27 aproximadamente.</p></section>`;
+  write('/calculadora-consumo-electrico/', layout({
+    title: 'Calculadora de consumo eléctrico: de vatios a kWh y euros',
+    desc: 'Calcula el consumo en kWh y el coste en euros de cualquier aparato o de toda tu casa con el precio actual de la luz. Gratis y sin registro.',
+    urlPath: '/calculadora-consumo-electrico/', body,
+    crumbs: [['/calculadora-consumo-electrico/', 'Calculadora de consumo']],
+    pageData: { type: 'calculadora', aparatos: lista, precio: MEDIA30_CON },
+  }), { priority: '0.8' });
+}
+
+// ---------------------------------------------------------------- guías
+function buildGuias() {
+  const P = MEDIA30_CON;
+  const fila = (n, kwh, href) => `<tr><td>${href ? `<a href="${href}">${n}</a>` : n}</td><td class="num">${C.fmt(kwh, 2)}</td><td class="num">${C.eurAuto(kwh * P)}</td></tr>`;
+  const vars = {
+    anio: YEAR,
+    media30sin: p3(MEDIA30), media30con: p3(P),
+    ejemploCalefactor: C.fmt(6 * P, 2),
+    standbyMin: C.fmt(100 * P, 0), standbyMax: C.fmt(400 * P, 0),
+    tablaCalefaccion: `<div class="table-wrap"><table class="data"><thead><tr><th>Sistema</th><th class="num">kWh eléctricos</th><th class="num">Coste por hora</th></tr></thead><tbody>
+${fila('Radiador de aceite', 1.5, '/cuanto-gasta/radiador-de-aceite/')}${fila('Emisor térmico', 1.5, '/cuanto-gasta/emisor-termico/')}${fila('Calefactor cerámico', 1.5, '/cuanto-gasta/calefactor/')}${fila('Estufa halógena / infrarrojos', 1.5, '/cuanto-gasta/estufa-electrica/')}${fila('Bomba de calor (SCOP 3)', 0.5, '/cuanto-gasta/bomba-de-calor/')}${fila('Bomba de calor (SCOP 4)', 0.375, '/cuanto-gasta/bomba-de-calor/')}
+</tbody></table></div>`,
+    tablaFreidoraHorno: `<div class="table-wrap"><table class="data"><thead><tr><th>Receta</th><th class="num">Freidora de aire</th><th class="num">Horno</th></tr></thead><tbody>
+${[['Patatas fritas (2 raciones)', 20, 35], ['Muslos de pollo', 25, 45], ['Verduras asadas', 15, 30], ['Recalentar pizza', 5, 15]].map(([n, tf, th]) => { const kf = 1.5 * 0.7 * (tf / 60) + 0.05; const kh = 2.5 * 0.45 * (th / 60) + 0.35; return `<tr><td>${n}</td><td class="num">${C.fmt(kf, 2)} kWh · ${C.eurAuto(kf * P)}</td><td class="num">${C.fmt(kh, 2)} kWh · ${C.eurAuto(kh * P)}</td></tr>`; }).join('')}
+</tbody></table></div>`,
+    tablaVerano: `<div class="table-wrap"><table class="data"><thead><tr><th>Aparato</th><th class="num">kWh/mes</th><th class="num">€/mes</th></tr></thead><tbody>
+${fila('Ventilador (50 W)', 0.05 * 240, '/cuanto-gasta/ventilador/')}${fila('Climatizador evaporativo (80 W)', 0.08 * 240, '/cuanto-gasta/climatizador-evaporativo/')}${fila('Aire acondicionado split inverter (800 W medios)', 0.8 * 240, '/cuanto-gasta/aire-acondicionado/')}${fila('Aire acondicionado portátil (1.000 W, 80 %)', 0.8 * 240, '/cuanto-gasta/aire-acondicionado-portatil/')}
+</tbody></table></div>`,
+  };
+  const fill = (s) => s.replace(/\{\{(\w+)\}\}/g, (_, k) => (k in vars ? vars[k] : `{{${k}}}`));
+  for (const g of GUIAS) {
+    const otras = GUIAS.filter((x) => x.slug !== g.slug).slice(0, 4);
+    const body = `<article class="prose"><h1>${esc(g.titulo)}</h1>${fill(g.html)}
+<p class="muted method">Actualizado el ${C.fechaLarga(TODAY)} con los últimos precios publicados por Red Eléctrica.</p></article>
+${g.slug === 'calefaccion-electrica-que-gasta-menos' ? `<aside class="affiliate card"><h2 class="h3">Opciones eficientes</h2><div class="prod-grid"><a class="prod" href="${esc(amazonUrl('aire acondicionado split inverter bomba de calor'))}" ${amazonAttrs}><strong>Split con bomba de calor</strong><span>La calefacción eléctrica más barata de usar.</span><em>Ver en Amazon →</em></a><a class="prod" href="${esc(amazonUrl('manta electrica'))}" ${amazonAttrs}><strong>Manta eléctrica</strong><span>Calor en el sofá por céntimos.</span><em>Ver en Amazon →</em></a><a class="prod" href="${esc(amazonUrl('burlete puerta ventana'))}" ${amazonAttrs}><strong>Burletes</strong><span>Menos corrientes, menos horas de calefacción.</span><em>Ver en Amazon →</em></a></div></aside>` : ''}
+<section><h2>Otras guías</h2><ul class="link-list">${otras.map((o) => `<li><a href="/guias/${o.slug}/">${esc(o.titulo)}</a></li>`).join('')}</ul></section>`;
+    write(`/guias/${g.slug}/`, layout({
+      title: fill(g.seoTitulo || g.titulo), desc: g.descripcion, urlPath: `/guias/${g.slug}/`, body, ogType: 'article',
+      crumbs: [['/guias/', 'Guías'], [`/guias/${g.slug}/`, g.titulo]],
+      jsonld: [{ '@context': 'https://schema.org', '@type': 'Article', headline: g.titulo, description: g.descripcion, dateModified: TODAY, inLanguage: 'es-ES', publisher: { '@type': 'Organization', name: CFG.siteName } }],
+      pageData: g.slug.startsWith('horario') ? { type: 'tramo' } : null,
+    }), { priority: '0.7' });
+  }
+  write('/guias/', layout({
+    title: 'Guías para ahorrar en la factura de la luz',
+    desc: 'Guías prácticas sobre tarifas, horarios, calefacción eléctrica, standby y potencia contratada para pagar menos luz.',
+    urlPath: '/guias/',
+    body: `<section class="hero"><h1>Guías para pagar menos luz</h1><p class="lead">Explicaciones claras, con números reales y actualizadas automáticamente con el precio de la luz.</p></section><ul class="guide-list">${GUIAS.map((g) => `<li><a href="/guias/${g.slug}/"><strong>${esc(g.titulo)}</strong><span>${esc(g.resumen)}</span></a></li>`).join('')}</ul>`,
+    crumbs: [['/guias/', 'Guías']],
+  }), { priority: '0.6' });
+}
+
+// ---------------------------------------------------------------- páginas estáticas
+function buildStatic() {
+  const t = CFG.titular || {};
+  const repoIssues = `https://github.com/${CFG.repo}/issues`;
+  const contacto = t.email ? `<a href="mailto:${esc(t.email)}">${esc(t.email)}</a>` : `<a href="${repoIssues}" rel="noopener">abriendo una incidencia en GitHub</a>`;
+  write('/sobre/', layout({
+    title: 'Sobre CuántoGasta', desc: 'Qué es CuántoGasta, de dónde salen los datos y cómo se calculan los costes.', urlPath: '/sobre/',
+    crumbs: [['/sobre/', 'Sobre la web']],
+    body: `<article class="prose"><h1>Sobre ${esc(CFG.siteName)}</h1>
+<p>${esc(CFG.siteName)} nace para responder de forma rápida y con datos reales a dos preguntas que nos hacemos a menudo: <strong>¿cuánto cuesta la luz ahora?</strong> y <strong>¿cuánto me cuesta usar este aparato?</strong></p>
+<h2>De dónde salen los datos</h2>
+<p>Los precios horarios del PVPC se obtienen automáticamente cada día de la API pública de <a href="https://www.ree.es/es/apidatos" rel="noopener">Red Eléctrica de España (REData)</a>. Corresponden al término de energía de la tarifa 2.0TD (energía, peajes y cargos) sin impuestos, para la península, Baleares y Canarias.</p>
+<h2>Cómo calculamos el coste de cada aparato</h2>
+<p>Usamos potencias y consumos típicos de los modelos que se venden en España, etiquetas energéticas de la UE y el porcentaje de tiempo que los aparatos con termostato funcionan a plena potencia. A ese consumo le aplicamos el precio medio del PVPC de los últimos 30 días con impuesto eléctrico (${C.fmt(IMP.impuestoElectrico * 100, 2)} %) e IVA (${C.fmt(IMP.iva * 100, 0)} %). No incluimos el término de potencia ni el alquiler del contador, porque no dependen del uso de cada aparato.</p>
+<p>Son estimaciones orientativas: el consumo real depende de cada modelo y de cómo se use. Para conocerlo con exactitud recomendamos un enchufe medidor de consumo.</p>
+<h2>Independencia</h2>
+<p>La web se financia con publicidad y enlaces de afiliado. Ninguna marca paga por aparecer ni influye en los cálculos.</p>
+<h2>Contacto</h2><p>Puedes enviar sugerencias o avisar de errores ${contacto}.</p></article>`,
+  }), { priority: '0.3' });
+
+  const titularHtml = t.nombre ? `<ul><li>Titular: ${esc(t.nombre)}</li>${t.nif ? `<li>NIF: ${esc(t.nif)}</li>` : ''}${t.email ? `<li>Correo electrónico: ${esc(t.email)}</li>` : ''}</ul>` : `<p>Para cualquier comunicación puedes contactar ${contacto}.</p>`;
+  write('/aviso-legal/', layout({
+    title: 'Aviso legal', desc: `Aviso legal de ${CFG.siteName}: titularidad, objeto de la web, exactitud de la información, enlaces y legislación aplicable.`, urlPath: '/aviso-legal/', crumbs: [['/aviso-legal/', 'Aviso legal']],
+    body: `<article class="prose"><h1>Aviso legal</h1>
+<h2>Titularidad</h2>${titularHtml}
+<h2>Objeto</h2><p>${esc(CFG.siteName)} ofrece información sobre el precio de la luz en España y estimaciones del consumo eléctrico de electrodomésticos, con fines exclusivamente informativos.</p>
+<h2>Exactitud de la información</h2><p>Los precios proceden de fuentes públicas (Red Eléctrica de España) y se actualizan de forma automática. Aunque se procura su exactitud, pueden existir retrasos o errores. Las estimaciones de coste son orientativas y no sustituyen a la información de tu factura ni constituyen asesoramiento. El titular no se responsabiliza de las decisiones tomadas a partir de esta información.</p>
+<h2>Enlaces</h2><p>La web contiene enlaces a sitios de terceros, algunos de ellos de afiliado. El titular no se responsabiliza del contenido ni de las condiciones de dichos sitios.</p>
+<h2>Propiedad intelectual</h2><p>Los textos, diseño y código de la web pertenecen a su titular. Los datos de precios son de Red Eléctrica de España y se reutilizan citando la fuente.</p>
+<h2>Legislación</h2><p>Este aviso se rige por la legislación española.</p></article>`,
+  }), { priority: '0.1' });
+
+  const ads = MON.adsenseClient;
+  write('/privacidad/', layout({
+    title: 'Política de privacidad y cookies', desc: `Política de privacidad y cookies de ${CFG.siteName}: qué datos se tratan, cookies, alojamiento y enlaces de afiliado.`, urlPath: '/privacidad/', crumbs: [['/privacidad/', 'Privacidad y cookies']],
+    body: `<article class="prose"><h1>Política de privacidad y cookies</h1>
+<h2>Datos personales</h2><p>${esc(CFG.siteName)} no tiene formularios de registro ni recoge datos personales. Las calculadoras funcionan íntegramente en tu navegador: los valores que introduces no se envían a ningún servidor.</p>
+<h2>Alojamiento</h2><p>La web está alojada en GitHub Pages (GitHub, Inc.), que puede registrar la dirección IP de los visitantes por motivos de seguridad. Más información en la <a href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">declaración de privacidad de GitHub</a>.</p>
+<h2>Cookies</h2>
+${ads ? `<p>Esta web utiliza <strong>Google AdSense</strong> para mostrar publicidad. Google y sus socios pueden usar cookies para mostrar anuncios basados en tus visitas a esta y otras webs. Antes de usar cookies no necesarias se solicita tu consentimiento mediante la plataforma de gestión de consentimiento de Google, desde la que puedes cambiar tu elección en cualquier momento. Puedes configurar la publicidad personalizada en <a href="https://adssettings.google.com" rel="noopener">la configuración de anuncios de Google</a> y consultar <a href="https://policies.google.com/technologies/ads?hl=es" rel="noopener">cómo usa Google las cookies en publicidad</a>.</p>` : '<p>Esta web <strong>no utiliza cookies</strong> propias ni de terceros con fines analíticos o publicitarios.</p>'}
+<p>Las preferencias de las calculadoras pueden guardarse en el almacenamiento local de tu navegador para tu comodidad; no se usan para identificarte y puedes borrarlas desde la configuración del navegador.</p>
+${CFG.analitica?.cloudflareToken ? '<h2>Estadísticas</h2><p>Usamos Cloudflare Web Analytics, que mide visitas de forma agregada sin cookies y sin identificar a los usuarios.</p>' : ''}
+<h2>Enlaces de afiliado</h2><p>Algunos enlaces a tiendas (por ejemplo, Amazon) son de afiliado. Al pulsarlos, la tienda puede usar sus propias cookies para atribuir la compra, según su política de privacidad.</p>
+<h2>Contacto</h2><p>Para cualquier consulta sobre privacidad puedes contactar ${contacto}.</p></article>`,
+  }), { priority: '0.1' });
+
+  write('/404.html', layout({
+    title: 'Página no encontrada', desc: 'La página que buscas no existe.', urlPath: '/404.html', noindex: true,
+    body: `<section class="hero"><h1>Página no encontrada</h1><p class="lead">Puede que la dirección haya cambiado. Prueba con:</p><ul class="link-list"><li><a href="/">Precio de la luz hoy</a></li><li><a href="/cuanto-gasta/">¿Cuánto gasta cada aparato?</a></li><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li></ul></section>`,
+  }), { sitemapEntry: false });
+}
+
+// ---------------------------------------------------------------- ficheros técnicos
+function buildTech() {
+  // Datos para el refresco en el navegador
+  const recent = Object.fromEntries(DATES.slice(-10).map((d) => [d, PRICES[d]]));
+  write('/datos/ultimos.json', JSON.stringify({ generado: BUILD_ISO, hoy: TODAY, dias: recent }));
+  const csv = ['fecha,hora,pvpc_eur_mwh', ...DATES.flatMap((d) => { const lb = C.hourLabels(PRICES[d].length); return PRICES[d].map((v, i) => `${d},${C.pad(lb[i])}:00,${v}`); })].join('\n');
+  write('/datos/pvpc.csv', csv + '\n');
+
+  write('/robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  write('/sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemap.map((u) => `<url><loc>${u.loc}</loc><lastmod>${u.lastmod}</lastmod>${u.priority ? `<priority>${u.priority}</priority>` : ''}</url>`).join('\n')}\n</urlset>\n`);
+  if (MON.adsenseClient) write('/ads.txt', `google.com, ${MON.adsenseClient.replace(/^ca-/, '')}, DIRECT, f08c47fec0942fa0\n`);
+  if (CFG.indexNowKey) write(`/${CFG.indexNowKey}.txt`, CFG.indexNowKey);
+  write('/manifest.webmanifest', JSON.stringify({
+    name: `${CFG.siteName} · Precio de la luz`, short_name: CFG.siteName, start_url: '/', display: 'standalone', lang: 'es-ES',
+    background_color: '#ffffff', theme_color: '#0f766e',
+    icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }, { src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml' }],
+  }));
+  // Lista de URLs para IndexNow (las que cambian a diario primero)
+  const daily = ['/', '/precio-luz-manana/', '/mejor-hora/', ...MEJOR_HORA.map((m) => `/mejor-hora/${m.slug}/`), `/precio-luz/${LATEST}/`, `/precio-luz/${TODAY.slice(0, 7)}/`]
+    .concat(HAS_TOMORROW ? [`/precio-luz/${TOMORROW}/`] : []);
+  write('/datos/indexnow-diario.json', JSON.stringify(daily.map((p) => SITE + p)));
+}
+
+// ---------------------------------------------------------------- run
+buildHome();
+buildTomorrow();
+buildDayArchive();
+buildMonths();
+buildMejorHora();
+buildAparatos();
+buildCalculadora();
+buildGuias();
+buildStatic();
+buildTech();
+console.log(`Build OK: ${sitemap.length} páginas · hoy=${TODAY} · último dato=${LATEST} · mañana=${HAS_TOMORROW ? 'sí' : 'no'} · media30=${p3(MEDIA30)} €/kWh (${p3(MEDIA30_CON)} con impuestos)`);
+if (!HAS_TODAY) console.warn(`AVISO: no hay precios de hoy (${TODAY}); se muestran los del ${LATEST}.`);

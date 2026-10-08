@@ -1,0 +1,12 @@
+{
+  "name": "cuantogasta",
+  "private": true,
+  "type": "module",
+  "description": "Precio de la luz hoy (PVPC) y cuánto gasta cada aparato. Sitio estático que se actualiza solo.",
+  "scripts": {
+    "precios": "node src/fetch-prices.mjs",
+    "build": "node src/build.mjs",
+    "dev": "node src/fetch-prices.mjs && node src/build.mjs && node src/serve.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

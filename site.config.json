@@ -1,0 +1,23 @@
+{
+  "siteName": "CuántoGasta",
+  "siteUrl": "https://shikimokami.github.io",
+  "lema": "Precio de la luz hoy y cuánto gasta cada aparato",
+  "monetizacion": {
+    "amazonTag": "",
+    "adsenseClient": "",
+    "kofiUrl": "",
+    "ofertaTarifa": { "url": "", "texto": "" }
+  },
+  "verificacion": {
+    "googleSiteVerification": "",
+    "bingSiteVerification": ""
+  },
+  "analitica": {
+    "cloudflareToken": ""
+  },
+  "titular": { "nombre": "", "nif": "", "email": "" },
+  "impuestos": { "impuestoElectrico": 0.0511269632, "iva": 0.21 },
+  "indexNowKey": "d5a0f9976f93a088625b1e0a8cf87257",
+  "inicioHistorico": "2025-10-01",
+  "repo": "Shikimokami/Shikimokami.github.io"
+}

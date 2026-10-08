@@ -1,0 +1,86 @@
+# Actualiza los precios de la luz, regenera la web y la publica en GitHub Pages.
+# Funciona solo: no hay que tocar nada. También se ejecuta al editar cualquier fichero (p. ej. site.config.json).
+name: Actualizar y publicar
+
+on:
+  schedule:
+    - cron: '35 19 * * *'  # tras publicarse el precio de mañana (21:35 en verano / 20:35 en invierno)
+    - cron: '5 21 * * *'   # reintento por si REE se retrasa
+    - cron: '10 22 * * *'  # justo después de medianoche en verano
+    - cron: '10 23 * * *'  # justo después de medianoche en invierno
+    - cron: '0 5 * * *'    # repaso de madrugada
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  actions: write
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Descargar precios PVPC (Red Eléctrica)
+        run: node src/fetch-prices.mjs
+
+      - name: Guardar los precios nuevos en el repositorio
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if ! git diff --cached --quiet; then
+            git commit -m "Precios PVPC $(date -u +%F)"
+            git pull --rebase --autostash || true
+            git push || echo "::warning::No se pudieron guardar los precios; se reintentará en la próxima ejecución."
+          fi
+
+      - name: Generar la web
+        run: node src/build.mjs
+
+      - name: Comprobar que no hay nada roto
+        run: node tools/check.mjs
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  avisar:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Avisar a los buscadores (IndexNow)
+        if: github.event_name != 'schedule' || github.event.schedule == '35 19 * * *' || github.event.schedule == '10 23 * * *'
+        run: node tools/indexnow.mjs ${{ github.event_name == 'schedule' && 'diario' || 'todo' }}
+        continue-on-error: true
+      - name: Mantener activa la programación diaria
+        run: |
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/publicar.yml/enable" || true
+      - name: Comprobar que la web tiene los precios de hoy
+        # Si falla, GitHub te envía un correo. La web sigue online con los últimos datos.
+        if: github.event_name != 'schedule' || github.event.schedule == '0 5 * * *'
+        run: sleep 60 && node tools/estado.mjs
