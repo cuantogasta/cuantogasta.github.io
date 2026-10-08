@@ -7,18 +7,11 @@ La web ya está publicada y se actualiza sola. Para que **el dinero llegue a ti*
 
 ---
 
-## 1. Google Search Console (gratis, 5 min) — **lo más importante**
+## 1. Google Search Console — ✅ HECHO (8/10/2026)
 
-Sin esto, Google puede tardar meses en encontrar la web. Search Console es lo que le dice a Google que existe.
+La web está verificada en Search Console, el sitemap (456 páginas) está enviado y se ha pedido la indexación de las páginas principales. Bing y otros buscadores reciben avisos automáticos por IndexNow cada día.
 
-1. Entra en <https://search.google.com/search-console> con tu cuenta de Google.
-2. Pulsa **Añadir propiedad** → **Prefijo de la URL** → `https://cuantogasta.github.io/`.
-3. Elige el método **Etiqueta HTML**. Copia solo el valor de `content="..."`, por ejemplo `AbCdEf123...`.
-4. Pégalo en `site.config.json` → `"verificacion"` → `"googleSiteVerification"` y guarda.
-5. Espera 2 minutos y pulsa **Verificar** en Search Console.
-6. En el menú **Sitemaps**, añade `sitemap.xml` y pulsa **Enviar**.
-
-(Opcional) En <https://www.bing.com/webmasters> puedes importar la web desde Search Console con un clic. Bing ya recibe avisos automáticos por IndexNow.
+Puedes ver cuántas personas llegan desde Google en <https://search.google.com/search-console> → **Rendimiento**. Los primeros datos aparecen al cabo de unos días.
 
 ## 2. Amazon Afiliados (gratis, 10 min) — ingresos por compras
 
