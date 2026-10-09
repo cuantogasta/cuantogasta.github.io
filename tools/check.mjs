@@ -19,6 +19,7 @@ const html = files.filter((f) => f.endsWith('.html'));
 const exists = (urlPath) => {
   const clean = urlPath.split('#')[0].split('?')[0];
   if (!clean || clean === '/') return fs.existsSync(path.join(DIST, 'index.html'));
+  if (clean.startsWith('/gasolina/')) return true; // otra web del mismo dominio (repositorio cuantogasta/gasolina)
   const p = path.join(DIST, clean);
   return fs.existsSync(p) && (fs.statSync(p).isFile() || fs.existsSync(path.join(p, 'index.html')));
 };

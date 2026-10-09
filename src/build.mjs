@@ -94,6 +94,7 @@ const NAV = [
   ['/cuanto-gasta/', '¿Cuánto gasta?'],
   ['/calculadora-consumo-electrico/', 'Calculadora'],
   ['/guias/', 'Guías'],
+  ['/gasolina/', 'Gasolina'],
 ];
 const ORG = { '@type': 'Organization', name: CFG.siteName, url: SITE + '/', logo: { '@type': 'ImageObject', url: `${SITE}/icon-512.png` } };
 
@@ -168,7 +169,7 @@ function footer() {
 ${MON.kofiUrl ? `<p><a class="btn btn-small" href="${esc(MON.kofiUrl)}" rel="noopener" target="_blank">☕ Invítame a un café</a></p>` : ''}</div>
 <div><strong>Precio de la luz</strong><ul><li><a href="/">Hoy por horas</a></li><li><a href="/precio-luz-manana/">Mañana</a></li><li><a href="/mejor-hora/">Mejor hora para…</a></li><li><a href="/precio-luz/">Histórico</a></li><li><a href="/guias/horario-luz-tramos-punta-llano-valle/">Horarios punta y valle</a></li></ul></div>
 <div><strong>¿Cuánto gasta?</strong><ul>${top.map((a) => `<li><a href="/cuanto-gasta/${a.slug}/">${esc(cap(a.corto || a.nombre))}</a></li>`).join('')}</ul></div>
-<div><strong>Más</strong><ul><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li><li><a href="/guias/">Guías de ahorro</a></li><li><a href="/sobre/">Quiénes somos y método</a></li><li><a href="/aviso-legal/">Aviso legal</a></li><li><a href="/privacidad/">Privacidad y cookies</a></li></ul></div>
+<div><strong>Más</strong><ul><li><a href="/gasolina/">Precio de la gasolina hoy</a></li><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li><li><a href="/guias/">Guías de ahorro</a></li><li><a href="/sobre/">Quiénes somos y método</a></li><li><a href="/aviso-legal/">Aviso legal</a></li><li><a href="/privacidad/">Privacidad y cookies</a></li></ul></div>
 </div>
 <p class="legal">Precios PVPC de la tarifa 2.0TD para la península, Baleares y Canarias (fuente: <a href="https://www.ree.es/es/apidatos" rel="noopener">Red Eléctrica, REData</a>). Los precios por hora no incluyen impuestos; las estimaciones de coste incluyen impuesto eléctrico (${C.fmt(IMP.impuestoElectrico * 100, 2)} %) e IVA (${C.fmt(IMP.iva * 100, 0)} %). Información orientativa, no constituye asesoramiento.${MON.amazonTag ? ' En calidad de Afiliado de Amazon, obtengo ingresos por las compras adscritas que cumplen los requisitos aplicables.' : ''}</p>
 </div></footer>`;
@@ -937,7 +938,8 @@ function buildTech() {
   write('/datos/ultimos.json', JSON.stringify({ generado: BUILD_ISO, hoy: TODAY, dias: recent }));
   const csv = ['fecha,hora,pvpc_eur_mwh', ...DATES.flatMap((d) => { const lb = C.hourLabels(PRICES[d].length); return PRICES[d].map((v, i) => `${d},${C.pad(lb[i])}:00,${v}`); })].join('\n');
   write('/datos/pvpc.csv', csv + '\n');
-  write('/robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  // La web de la gasolina vive en /gasolina/ (repositorio cuantogasta/gasolina) y publica su propio sitemap.
+  write('/robots.txt', `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\nSitemap: ${SITE}/gasolina/sitemap.xml\n`);
   write('/sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemap.map((u) => `<url><loc>${u.loc}</loc><lastmod>${u.lastmod}</lastmod>${u.priority ? `<priority>${u.priority}</priority>` : ''}</url>`).join('\n')}\n</urlset>\n`);
   if (ADS) write('/ads.txt', `google.com, ${MON.adsenseClient.replace(/^ca-/, '')}, DIRECT, f08c47fec0942fa0\n`);
   if (CFG.indexNowKey) write(`/${CFG.indexNowKey}.txt`, CFG.indexNowKey);
