@@ -21,7 +21,11 @@ ID de seguimiento `cuantogasta03-21` activo en todos los enlaces a Amazon de la 
 - Amazon revisa la cuenta cuando llegan las **3 primeras ventas en 180 días**. Si no se llega, se puede volver a solicitar.
 - Recuerda completar en Afiliados la **información fiscal y de pago** para poder cobrar.
 
-## 3. Google AdSense (gratis) — ingresos por publicidad
+## 3. Google AdSense (gratis) — ⏳ SOLICITADO (10/10/2026)
+
+Hecho: ID de editor `ca-pub-2282229307415265` en las dos webs (`site.config.json`), `ads.txt` publicado, sitio `cuantogasta.github.io` verificado y revisión solicitada, mensaje de consentimiento europeo publicado y anuncios automáticos activados. Falta solo que Google apruebe el sitio (de unos días a unas semanas); los anuncios aparecerán solos. Estado en AdSense → **Sitios**.
+
+Pasos que se siguieron (por si hubiera que repetirlos):
 
 **Cuándo hacerlo:** cuando Search Console muestre que Google ya ha indexado páginas, normalmente entre 2 y 6 semanas después del paso 1. AdSense rechaza las webs que aún no reciben visitas.
 
