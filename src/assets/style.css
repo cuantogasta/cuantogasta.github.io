@@ -475,3 +475,5 @@ label.inline input { width: 7em; }
 .legal a { color: #b9d6cf; }
 @media (max-width: 760px) { .foot-cols { grid-template-columns: 1fr 1fr; } .foot-brand { grid-column: 1 / -1; } }
 @media (max-width: 560px) { table.cmp th:nth-child(3), table.cmp td:nth-child(3) { display: none; } table.cmp td:nth-child(2) { font-size: .85rem; color: var(--muted); } }
+
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; align-items: start; }

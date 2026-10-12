@@ -169,7 +169,7 @@ function footer() {
 ${MON.kofiUrl ? `<p><a class="btn btn-small" href="${esc(MON.kofiUrl)}" rel="noopener" target="_blank">☕ Invítame a un café</a></p>` : ''}</div>
 <div><strong>Precio de la luz</strong><ul><li><a href="/">Hoy por horas</a></li><li><a href="/precio-luz-manana/">Mañana</a></li><li><a href="/mejor-hora/">Mejor hora para…</a></li><li><a href="/precio-luz/">Histórico</a></li><li><a href="/guias/horario-luz-tramos-punta-llano-valle/">Horarios punta y valle</a></li></ul></div>
 <div><strong>¿Cuánto gasta?</strong><ul>${top.map((a) => `<li><a href="/cuanto-gasta/${a.slug}/">${esc(cap(a.corto || a.nombre))}</a></li>`).join('')}</ul></div>
-<div><strong>Más</strong><ul><li><a href="/gasolina/">Precio de la gasolina hoy</a></li><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li><li><a href="/guias/">Guías de ahorro</a></li><li><a href="/sobre/">Quiénes somos y método</a></li><li><a href="/aviso-legal/">Aviso legal</a></li><li><a href="/privacidad/">Privacidad y cookies</a></li></ul></div>
+<div><strong>Más</strong><ul><li><a href="/gasolina/">Precio de la gasolina hoy</a></li><li><a href="/calculadora-consumo-electrico/">Calculadora de consumo</a></li><li><a href="/guias/">Guías de ahorro</a></li><li><a href="/widget/">Widget gratis para tu web</a></li><li><a href="/sobre/">Quiénes somos y método</a></li><li><a href="/aviso-legal/">Aviso legal</a></li><li><a href="/privacidad/">Privacidad y cookies</a></li></ul></div>
 </div>
 <p class="legal">Precios PVPC de la tarifa 2.0TD para la península, Baleares y Canarias (fuente: <a href="https://www.ree.es/es/apidatos" rel="noopener">Red Eléctrica, REData</a>). Los precios por hora no incluyen impuestos; las estimaciones de coste incluyen impuesto eléctrico (${C.fmt(IMP.impuestoElectrico * 100, 2)} %) e IVA (${C.fmt(IMP.iva * 100, 0)} %). Información orientativa, no constituye asesoramiento.${MON.amazonTag ? ' En calidad de Afiliado de Amazon, obtengo ingresos por las compras adscritas que cumplen los requisitos aplicables.' : ''}</p>
 </div></footer>`;
@@ -954,6 +954,66 @@ function buildTech() {
 }
 
 // ---------------------------------------------------------------- run
+// ---------------------------------------------------------------- widget para otras webs
+// /widget/luz/ es una página mínima para meter en un iframe (sin índice en Google). /widget/ explica cómo ponerla
+// y da el código: el enlace que va debajo del iframe es el que suma enlaces hacia la web.
+function buildWidget() {
+  const dias = [LATEST, HAS_TOMORROW ? TOMORROW : null].filter(Boolean).map((d) => ({ d, v: PRICES[d].map((x) => +(x / 1000).toFixed(4)) }));
+  const datos = JSON.stringify({ dias });
+  const css = `*{box-sizing:border-box}html,body{height:100%}body{margin:0;font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#10231f;background:#fff}
+.w{height:100%;padding:12px 14px;border:1px solid #d5e4df;border-radius:12px;display:flex;flex-direction:column;gap:7px;overflow:hidden}
+.t{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:700;font-size:15px;margin:0}.t small{font-weight:500;color:#5b6f69}
+.ahora{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.ahora b{font-size:28px;letter-spacing:-.5px}.ahora span{color:#5b6f69}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:700}.b{background:#dcfce7;color:#166534}.m{background:#fef3c7;color:#92400e}.c{background:#ffe4e6;color:#9f1239}
+.l{color:#5b6f69}.l strong{color:#10231f}
+.bars{flex:1;display:flex;align-items:flex-end;gap:2px;min-height:40px}.bars i{flex:1;border-radius:2px 2px 0 0;background:#99d5c9}.bars i.b{background:#22c55e}.bars i.m{background:#f5b324}.bars i.c{background:#fb7185}.bars i.x{outline:2px solid #10231f;outline-offset:1px}
+.f{display:flex;justify-content:space-between;font-size:12px}.f a{color:#0f766e;font-weight:700;text-decoration:none}.f span{color:#5b6f69}
+@media (prefers-color-scheme:dark){body{background:#0f1b18;color:#e8efec}.w{border-color:#22312c}.ahora span,.l,.t small,.f span{color:#9db0aa}.l strong{color:#e8efec}.f a{color:#5eead4}.bars i.x{outline-color:#e8efec}}`;
+  const js = `(()=>{const D=${datos};
+const ahora=()=>{const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(new Date()).map(x=>[x.type,x.value]));return{d:p.year+'-'+p.month+'-'+p.day,h:Number(p.hour)%24}};
+const n=ahora();const dia=D.dias.find(x=>x.d===n.d)||D.dias[0];const v=dia.v;
+const etiquetas=v.length===23?[...Array(24).keys()].filter(h=>h!==2):v.length===25?[0,1,2,2,...[...Array(21).keys()].map(h=>h+3)]:[...Array(v.length).keys()];
+const s=[...v].sort((a,b)=>a-b);const t1=s[Math.floor(v.length/3)],t2=s[Math.floor(2*v.length/3)];const nivel=x=>x<t1?'b':x<t2?'m':'c';
+const f3=x=>x.toLocaleString('es-ES',{minimumFractionDigits:3,maximumFractionDigits:3});const hh=h=>String(h).padStart(2,'0');
+const esHoy=dia.d===n.d;let i=etiquetas.indexOf(n.h);if(i<0)i=Math.min(n.h,v.length-1);
+const [y,m,d]=dia.d.split('-');document.getElementById('fecha').textContent=Number(d)+'/'+Number(m)+'/'+y;
+const media=v.reduce((a,b)=>a+b,0)/v.length;document.getElementById('media').textContent=f3(media)+' €/kWh';
+const baratas=v.map((x,k)=>({x,h:etiquetas[k]})).sort((a,b)=>a.x-b.x).slice(0,3).sort((a,b)=>a.h-b.h);
+document.getElementById('baratas').textContent=baratas.map(o=>hh(o.h)+'–'+hh((o.h+1)%24)+' h').join(' · ');
+if(esHoy){document.getElementById('hora').textContent='Ahora ('+hh(etiquetas[i])+':00–'+hh((etiquetas[i]+1)%24)+':00)';document.getElementById('precio').textContent=f3(v[i])+' €/kWh';const p=document.getElementById('nivel');const nv=nivel(v[i]);p.className='pill '+nv;p.textContent=nv==='b'?'barata':nv==='m'?'normal':'cara';}
+else{document.getElementById('hora').textContent='Media del día';document.getElementById('precio').textContent=f3(media)+' €/kWh';document.getElementById('nivel').remove();}
+const max=Math.max(...v);document.getElementById('bars').innerHTML=v.map((x,k)=>'<i class="'+nivel(x)+(esHoy&&k===i?' x':'')+'" style="height:'+Math.max(6,Math.round(x/max*100))+'%" title="'+hh(etiquetas[k])+' h: '+f3(x)+' €/kWh"></i>').join('');})();`;
+  const widget = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,follow">
+<title>Precio de la luz hoy · ${esc(CFG.siteName)}</title><meta name="description" content="Widget con el precio de la luz de hoy por horas (PVPC), la hora actual y las horas más baratas, para poner en cualquier web."><link rel="canonical" href="${SITE}/"><style>${css}</style></head><body>
+<main class="w"><h1 class="t">⚡ Precio de la luz <small id="fecha"></small></h1>
+<div class="ahora"><span id="hora"></span><b id="precio"></b><span id="nivel" class="pill"></span></div>
+<div class="l">Media del día: <strong id="media"></strong></div>
+<div class="l">Más baratas: <strong id="baratas"></strong></div>
+<div class="bars" id="bars" aria-hidden="true"></div>
+<div class="f"><a href="${SITE}/" target="_blank" rel="noopener">Ver todas las horas →</a><span>Sin impuestos · PVPC</span></div></main>
+<script>${js}</script></body></html>`;
+  write('/widget/luz/', widget, { sitemapEntry: false });
+
+  const codigo = `<iframe src="${SITE}/widget/luz/" width="300" height="250" style="border:0;max-width:100%" title="Precio de la luz hoy por horas" loading="lazy"></iframe>
+<p style="font:12px/1.4 sans-serif;margin:4px 0 0">Datos: <a href="${SITE}/">precio de la luz hoy por horas</a> · ${esc(CFG.siteName)}</p>`;
+  const body = `${pageHead({ ico: 'bolt', eyebrow: `${icon('bolt')} Gratis para tu web o blog`, h1: 'Widget del precio de la luz para tu web', sub: 'Muestra en tu web el precio de la luz de hoy hora a hora. Se actualiza solo cada día, es gratis y no necesita registro.', meta: false })}
+<div class="two-col"><div class="card"><h2 class="h3">Así se ve</h2><iframe src="/widget/luz/" width="300" height="250" style="border:0;max-width:100%" title="Precio de la luz hoy por horas" loading="lazy"></iframe></div>
+<div class="card"><h2 class="h3">Cópialo en tu web</h2><p>Pega este código donde quieras que aparezca (en WordPress, en un bloque «HTML personalizado»):</p>
+<textarea id="codigo-widget" readonly rows="7" style="width:100%;font:13px/1.4 ui-monospace,monospace;padding:10px;border-radius:10px">${esc(codigo)}</textarea>
+<p><button class="btn" type="button" id="copiar-widget">${icon('check')}<span>Copiar código</span></button></p>
+<p class="muted">Puedes cambiar el ancho y el alto. Funciona en modo claro y oscuro.</p></div></div>
+<section class="prose sec"><h2>Preguntas frecuentes</h2>
+<h3>¿Cuesta algo?</h3><p>No. Es gratis para cualquier web, blog, ayuntamiento, comunidad de vecinos o medio de comunicación. Solo te pedimos que mantengas el enlace de debajo.</p>
+<h3>¿De dónde salen los datos?</h3><p>Son los precios oficiales del PVPC que publica Red Eléctrica cada tarde para el día siguiente. El widget se actualiza solo varias veces al día.</p>
+<h3>¿Hay algo parecido para la gasolina?</h3><p>Sí: el <a href="/gasolina/widget-gratis/">widget de las gasolineras más baratas</a> de cada municipio de España.</p></section>
+<script>document.getElementById('copiar-widget').addEventListener('click',async(e)=>{const t=document.getElementById('codigo-widget');t.select();try{await navigator.clipboard.writeText(t.value)}catch{document.execCommand('copy')}e.currentTarget.querySelector('span').textContent='¡Copiado!';});</script>`;
+  write('/widget/', layout({
+    title: 'Widget gratis del precio de la luz para tu web',
+    desc: 'Pon gratis en tu web o blog el precio de la luz de hoy por horas. Se actualiza solo cada día con los datos oficiales de Red Eléctrica. Solo tienes que copiar y pegar el código.',
+    urlPath: '/widget/', body, crumbs: [['/widget/', 'Widget para tu web']],
+  }), { priority: '0.5' });
+}
+
 buildHome();
 buildTomorrow();
 buildDayArchive();
@@ -963,6 +1023,7 @@ buildAparatos();
 buildCalculadora();
 buildGuias();
 buildStatic();
+buildWidget();
 buildTech();
 console.log(`Build OK: ${sitemap.length} páginas · hoy=${TODAY} · último dato=${LATEST} · mañana=${HAS_TOMORROW ? 'sí' : 'no'} · media30=${p3(MEDIA30)} €/kWh (${p3(MEDIA30_CON)} con impuestos)`);
 if (!HAS_TODAY) console.warn(`AVISO: no hay precios de hoy (${TODAY}); se muestran los del ${LATEST}.`);
