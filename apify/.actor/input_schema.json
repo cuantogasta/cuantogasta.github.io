@@ -1,0 +1,66 @@
+{
+    "title": "Spain Electricity Prices",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "startDate": {
+            "title": "Start date",
+            "type": "string",
+            "editor": "datepicker",
+            "description": "First day (YYYY-MM-DD). Empty = today. PVPC is available since 2021-06-01 and the spot market since 2014-04-01."
+        },
+        "endDate": {
+            "title": "End date",
+            "type": "string",
+            "editor": "datepicker",
+            "description": "Last day (YYYY-MM-DD). Empty = the start date, or tomorrow when both dates are empty and 'Include tomorrow' is on."
+        },
+        "includeTomorrow": {
+            "title": "Include tomorrow",
+            "type": "boolean",
+            "description": "With no dates, also return tomorrow's prices. The spot market is published around 13:00 and PVPC around 20:30 (Spanish time); until then tomorrow's PVPC fields are empty.",
+            "default": true
+        },
+        "output": {
+            "title": "Output",
+            "type": "string",
+            "editor": "select",
+            "enum": ["hourly", "daily"],
+            "enumTitles": ["One row per hour", "One row per day (averages, min, max, cheapest hours and windows)"],
+            "default": "hourly"
+        },
+        "cheapestHoursPerDay": {
+            "title": "Only the N cheapest hours of each day",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 25,
+            "description": "Hourly output only. E.g. 4 returns the 4 cheapest hours of each day: perfect to schedule a heat pump, an EV charger or a washing machine. 0 = all hours.",
+            "default": 0
+        },
+        "tariffPeriods": {
+            "title": "Tariff periods (2.0TD)",
+            "type": "array",
+            "editor": "select",
+            "description": "Hourly output only. Keep only these periods.",
+            "items": {
+                "type": "string",
+                "enum": ["P1", "P2", "P3"],
+                "enumTitles": ["P1 – peak (punta)", "P2 – mid-peak (llano)", "P3 – off-peak (valle)"]
+            },
+            "default": []
+        },
+        "includeSpotQuarterHours": {
+            "title": "Include 15-minute spot prices",
+            "type": "boolean",
+            "description": "Since October 2025 the day-ahead market has 15-minute prices. Adds the four quarter-hour prices of each hour.",
+            "default": false
+        },
+        "maxResults": {
+            "title": "Maximum results",
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 = no limit.",
+            "default": 0
+        }
+    }
+}

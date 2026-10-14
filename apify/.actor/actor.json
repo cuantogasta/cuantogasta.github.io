@@ -1,0 +1,13 @@
+{
+    "actorSpecification": 1,
+    "name": "spain-electricity-prices",
+    "title": "Spain Electricity Prices – PVPC & Spot, Hourly (REE)",
+    "description": "Official hourly electricity prices in Spain: the regulated PVPC 2.0TD tariff and the day-ahead spot market (OMIE), from Red Eléctrica. Today, tomorrow or any date since 2021, with tariff periods, daily rank and the cheapest hours.",
+    "version": "1.0",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    }
+}

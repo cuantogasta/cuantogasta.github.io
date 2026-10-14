@@ -1,0 +1,14 @@
+{
+    "name": "spain-electricity-prices",
+    "version": "1.0.0",
+    "description": "Official hourly electricity prices in Spain (PVPC and day-ahead spot market) from Red Eléctrica, with tariff periods and the cheapest hours.",
+    "type": "module",
+    "main": "src/main.js",
+    "scripts": {
+        "start": "node src/main.js"
+    },
+    "dependencies": {
+        "apify": "^3.2.6"
+    },
+    "license": "MIT"
+}

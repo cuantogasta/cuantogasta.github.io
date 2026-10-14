@@ -1,0 +1,59 @@
+{
+    "actorSpecification": 1,
+    "views": {
+        "overview": {
+            "title": "Hourly prices",
+            "transformation": {
+                "fields": [
+                    "date",
+                    "hour",
+                    "pvpcEURPerKWh",
+                    "spotEURPerMWh",
+                    "tariffPeriod",
+                    "dayRank",
+                    "priceLevel",
+                    "vsDayAveragePct",
+                    "isCheapestHour"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "date": {
+                        "label": "Date"
+                    },
+                    "hour": {
+                        "label": "Hour",
+                        "format": "number"
+                    },
+                    "pvpcEURPerKWh": {
+                        "label": "PVPC (€/kWh)",
+                        "format": "number"
+                    },
+                    "spotEURPerMWh": {
+                        "label": "Spot (€/MWh)",
+                        "format": "number"
+                    },
+                    "tariffPeriod": {
+                        "label": "Period"
+                    },
+                    "dayRank": {
+                        "label": "Rank in day",
+                        "format": "number"
+                    },
+                    "priceLevel": {
+                        "label": "Level"
+                    },
+                    "vsDayAveragePct": {
+                        "label": "vs day average (%)",
+                        "format": "number"
+                    },
+                    "isCheapestHour": {
+                        "label": "Cheapest",
+                        "format": "boolean"
+                    }
+                }
+            }
+        }
+    }
+}
