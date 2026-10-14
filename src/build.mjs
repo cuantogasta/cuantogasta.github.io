@@ -523,7 +523,7 @@ ${[...all].reverse().map((m) => `<tr><td><a href="/precio-luz/${m.ym}/">${cap(C.
     jsonld: [{
       '@context': 'https://schema.org', '@type': 'Dataset', name: 'Precio horario de la luz PVPC 2.0TD en España',
       description: 'Precio horario del término de energía del PVPC (tarifa 2.0TD) en €/MWh, recopilado diariamente de la API REData de Red Eléctrica de España.',
-      url: `${SITE}/precio-luz/`, creator: ORG, isBasedOn: 'https://www.ree.es/es/apidatos', temporalCoverage: `${DATES[0]}/${DATES.at(-1)}`, spatialCoverage: 'España',
+      url: `${SITE}/precio-luz/`, creator: ORG, license: 'https://creativecommons.org/licenses/by/4.0/', isBasedOn: 'https://www.ree.es/es/apidatos', temporalCoverage: `${DATES[0]}/${DATES.at(-1)}`, spatialCoverage: 'España',
       distribution: [{ '@type': 'DataDownload', encodingFormat: 'text/csv', contentUrl: `${SITE}/datos/pvpc.csv` }],
     }],
   }), { priority: '0.7' });
