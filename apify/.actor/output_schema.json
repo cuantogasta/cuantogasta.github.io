@@ -1,0 +1,18 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Spain Electricity Prices output",
+    "properties": {
+        "prices": {
+            "type": "string",
+            "title": "Prices",
+            "description": "One record per hour (or per day with the daily output) with PVPC and spot prices, tariff period and rank.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+        },
+        "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Average PVPC price of the period, cheapest and most expensive hour and a short summary of each day.",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/SUMMARY"
+        }
+    }
+}
