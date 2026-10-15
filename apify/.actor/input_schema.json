@@ -25,9 +25,16 @@
             "title": "Output",
             "type": "string",
             "editor": "select",
-            "enum": ["hourly", "daily"],
-            "enumTitles": ["One row per hour", "One row per day (averages, min, max, cheapest hours and windows)"],
-            "default": "hourly"
+            "enum": [
+                "hourly",
+                "daily"
+            ],
+            "enumTitles": [
+                "One row per hour",
+                "One row per day (averages, min, max, cheapest hours and windows)"
+            ],
+            "default": "hourly",
+            "description": "One row per hour, or one row per day with averages, minimum, maximum, cheapest hours and cheapest 2, 3 and 4-hour windows."
         },
         "cheapestHoursPerDay": {
             "title": "Only the N cheapest hours of each day",
@@ -44,8 +51,16 @@
             "description": "Hourly output only. Keep only these periods.",
             "items": {
                 "type": "string",
-                "enum": ["P1", "P2", "P3"],
-                "enumTitles": ["P1 – peak (punta)", "P2 – mid-peak (llano)", "P3 – off-peak (valle)"]
+                "enum": [
+                    "P1",
+                    "P2",
+                    "P3"
+                ],
+                "enumTitles": [
+                    "P1 – peak (punta)",
+                    "P2 – mid-peak (llano)",
+                    "P3 – off-peak (valle)"
+                ]
             },
             "default": []
         },
